@@ -1,0 +1,12 @@
+[package]
+name = "betterboxd-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tokio = { version = "1.53", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+betterboxd-core = { path = "../../crates/core" }
