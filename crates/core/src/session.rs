@@ -1,6 +1,6 @@
 //! 会话持久化（R5）：ChatSession JSON 落盘 + chat_sessions 索引行同步。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -69,11 +69,15 @@ impl SessionStore {
             "title": s.title, "created_at": s.created_at,
             "messages": s.messages,
         });
+        // 原子写：临时文件 + rename，防止崩溃产生截断 JSON
+        let tmp = self.dir.join(format!("{}.tmp", s.id));
         std::fs::write(
-            self.dir.join(format!("{}.json", s.id)),
+            &tmp,
             serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, self.dir.join(format!("{}.json", s.id)))
+            .map_err(|e| e.to_string())?;
         let (id, scope, movie_id, entry_id, review_id, title, created, last) = (
             s.id.clone(),
             s.scope.clone(),
@@ -92,7 +96,9 @@ impl SessionStore {
                      VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
                      ON CONFLICT(id) DO UPDATE SET title=?6, last_message_at=?8,
                        movie_id=?3, entry_id=?4, review_id=?5",
-                    rusqlite::params![id, scope, movie_id, entry_id, review_id, title, created, last],
+                    rusqlite::params![
+                        id, scope, movie_id, entry_id, review_id, title, created, last
+                    ],
                 )
             })
             .await

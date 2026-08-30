@@ -1,5 +1,5 @@
 //! TMDB v3 客户端：api_key 查询参数鉴权（spike③ 结论）、环境代理自动生效、
-//! 礼貌限速（250ms 间隔由调用方保证）。
+//! 实例内 250ms 限速。
 
 use serde_json::Value;
 
@@ -8,6 +8,7 @@ pub struct TmdbClient {
     http: reqwest::Client,
     key: String,
     language: String,
+    last_request: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
 }
 
 impl TmdbClient {
@@ -20,15 +21,32 @@ impl TmdbClient {
             http: builder.build().expect("HTTP 客户端构建失败"),
             key,
             language,
+            last_request: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// 实例内 250ms 限速（design.md §6）。
+    async fn throttle(&self) {
+        const INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+        let wait = {
+            let mut last = self.last_request.lock().unwrap();
+            let wait = match *last {
+                Some(t) => INTERVAL.checked_sub(t.elapsed()).unwrap_or_default(),
+                None => std::time::Duration::ZERO,
+            };
+            *last = Some(std::time::Instant::now());
+            wait
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
         }
     }
 
     async fn get(&self, path: &str, query: &str) -> Result<Value, String> {
+        self.throttle().await;
         let url = format!(
             "https://api.themoviedb.org/3{path}?api_key={}&language={}&{}",
-            self.key,
-            self.language,
-            query
+            self.key, self.language, query
         );
         let resp = self
             .http
@@ -58,7 +76,13 @@ impl TmdbClient {
         }
         let body = self.get("/search/movie", &query_str).await?;
         let mut out = Vec::new();
-        for r in body["results"].as_array().cloned().unwrap_or_default().into_iter().take(5) {
+        for r in body["results"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .take(5)
+        {
             out.push(serde_json::json!({
                 "tmdb_id": r["id"],
                 "title": r["title"],
@@ -73,11 +97,8 @@ impl TmdbClient {
 
     /// 详情 + credits（一次请求拿导演/类型/时长等）。
     pub async fn movie_details(&self, tmdb_id: i64) -> Result<Value, String> {
-        self.get(
-            &format!("/movie/{tmdb_id}"),
-            "append_to_response=credits",
-        )
-        .await
+        self.get(&format!("/movie/{tmdb_id}"), "append_to_response=credits")
+            .await
     }
 }
 

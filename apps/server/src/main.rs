@@ -2,20 +2,20 @@
 //! M1：控制台真实对话、会话持久化（R5）、预算预检、熔断/打断。
 
 use axum::{
+    Json, Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use betterboxd_core::agent;
 use betterboxd_core::config::Config;
 use betterboxd_core::db::DbHandle;
 use betterboxd_core::session::SessionStore;
-use betterboxd_core::tools::{self, ToolCtx, ToolRegistry};
 use betterboxd_core::tmdb::TmdbClient;
+use betterboxd_core::tools::{self, ToolCtx, ToolRegistry};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -29,6 +29,10 @@ struct AppState {
     db: DbHandle,
     sessions: Arc<SessionStore>,
     config: Arc<Mutex<Config>>,
+    client: betterboxd_core::llm::ChatClient,
+    tmdb: TmdbClient,
+    profile_name: String,
+    profile_model: String,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +50,9 @@ async fn health() -> &'static str {
 }
 
 async fn echo_rest(Json(input): Json<EchoIn>) -> impl IntoResponse {
-    Json(EchoOut { echo: format!("回显: {}", input.message) })
+    Json(EchoOut {
+        echo: format!("回显: {}", input.message),
+    })
 }
 
 /// 从 spikes/local.env 引导生成库配置（仅开发期一次性）。
@@ -109,7 +115,7 @@ async fn handle_chat(app: App, socket: WebSocket) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
     // 写任务：统一出口，避免 sink 双向借用
-    let writer = tokio::spawn(async move {
+    tokio::spawn(async move {
         while let Some(frame) = rx.recv().await {
             if sink.send(frame).await.is_err() {
                 break;
@@ -117,147 +123,184 @@ async fn handle_chat(app: App, socket: WebSocket) {
         }
     });
 
-    let session = app.sessions.new_session("global", None, None, None);
-    let hello = serde_json::json!({"type": "hello", "session_id": session.id});
+    let mut current = app.sessions.new_session("global", None, None, None);
+    let hello = serde_json::json!({"type": "hello", "session_id": current.id});
     let _ = tx.send(Message::Text(hello.to_string().into()));
 
     let cancel: Arc<Mutex<Option<CancellationToken>>> = Arc::new(Mutex::new(None));
-    let mut current = session;
 
-    while let Some(Ok(Message::Text(text))) = stream.next().await {
+    'outer: loop {
+        // —— 空闲态：等待用户消息 ——
+        let Some(Ok(Message::Text(text))) = stream.next().await else {
+            break 'outer;
+        };
         let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text) else {
             continue;
         };
-        match frame["type"].as_str() {
-            Some("interrupt") => {
-                if let Some(c) = cancel.lock().unwrap().as_ref() {
-                    c.cancel();
+        if frame["type"].as_str() != Some("user") {
+            continue; // 空闲期 interrupt 无对象可打断
+        }
+        let Some(user_text) = frame["text"].as_str().map(String::from) else {
+            continue;
+        };
+        let token = CancellationToken::new();
+        *cancel.lock().unwrap() = Some(token.clone());
+
+        let profile = match app.config.lock().unwrap().active().cloned() {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tx.send(Message::Text(
+                    serde_json::json!({"type": "error", "message": e})
+                        .to_string()
+                        .into(),
+                ));
+                continue;
+            }
+        };
+        let client = app.client.clone();
+        let tmdb = app.tmdb.clone();
+        let cfg_snapshot = app.config.lock().unwrap().clone();
+        let mut task_session = current.clone();
+
+        // —— 运行态：Agent 在独立任务中跑，主循环只盯 interrupt/断连 ——
+        let tx_task = tx.clone();
+        let sessions = app.sessions.clone();
+        let db = app.db.clone();
+        let pname = app.profile_name.clone();
+        let pmodel = app.profile_model.clone();
+        let mut run_handle = tokio::spawn(async move {
+            let ctx = ToolCtx {
+                db: db.clone(),
+                tmdb,
+                config: cfg_snapshot.clone(),
+            };
+            let tx_ev = tx_task.clone();
+            let on_event = move |ev: agent::AgentEvent| {
+                let f = match ev.kind {
+                    agent::AgentEventKind::Token(t) => {
+                        serde_json::json!({"type": "token", "data": t})
+                    }
+                    agent::AgentEventKind::ToolStart { name, args } => {
+                        serde_json::json!({"type": "tool", "name": name, "args": args})
+                    }
+                    agent::AgentEventKind::ToolDone { name, ok } => {
+                        serde_json::json!({"type": "tool_done", "name": name, "ok": ok})
+                    }
+                };
+                let _ = tx_ev.send(Message::Text(f.to_string().into()));
+            };
+            let run = agent::run(
+                &client,
+                &cfg_snapshot,
+                &db,
+                &ToolRegistry {
+                    metas: tools::registry().metas,
+                },
+                &ctx,
+                &mut task_session.messages,
+                &user_text,
+                token,
+                on_event,
+            )
+            .await;
+
+            if task_session.title.is_empty() && !user_text.is_empty() {
+                task_session.title = user_text.chars().take(30).collect();
+            }
+            let _ = sessions.save(&task_session).await;
+
+            match run {
+                Ok(summary) => {
+                    let (pid, pt, ct) = (
+                        task_session.id.clone(),
+                        summary.usage_tokens.0 as i64,
+                        summary.usage_tokens.1 as i64,
+                    );
+                    let _ = db
+                        .call(move |c| {
+                            c.execute(
+                                "INSERT INTO usage_records (id, session_id, profile_name,
+                               model, prompt_tokens, completion_tokens, at, kind)
+                             VALUES (?1,?2,?3,?4,?5,?6,?7,'llm')",
+                                rusqlite::params![
+                                    uuid::Uuid::now_v7().to_string(),
+                                    pid,
+                                    pname,
+                                    pmodel,
+                                    pt,
+                                    ct,
+                                    betterboxd_core::now()
+                                ],
+                            )
+                        })
+                        .await;
+                    let tx_done = tx_task.clone();
+                    let done = serde_json::json!({
+                        "type": "done",
+                        "interrupted": summary.interrupted,
+                        "steps": summary.steps,
+                        "tokens": {"prompt": summary.usage_tokens.0,
+                                    "completion": summary.usage_tokens.1},
+                        "aborted": summary.aborted_reason,
+                    });
+                    let _ = tx_done.send(Message::Text(done.to_string().into()));
+                }
+                Err(e) => {
+                    let _ = tx_task.send(Message::Text(
+                        serde_json::json!({"type": "error", "message": e})
+                            .to_string()
+                            .into(),
+                    ));
                 }
             }
-            Some("user") => {
-                let Some(user_text) = frame["text"].as_str().map(String::from) else {
-                    continue;
-                };
-                let token = CancellationToken::new();
-                *cancel.lock().unwrap() = Some(token.clone());
+            task_session
+        });
 
-                let profile = match app.config.lock().unwrap().active().cloned() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let _ = tx.send(Message::Text(
-                            serde_json::json!({"type": "error", "message": e})
-                                .to_string()
-                                .into(),
-                        ));
-                        continue;
+        loop {
+            tokio::select! {
+                res = &mut run_handle => {
+                    match res {
+                        Ok(done_session) => current = done_session,
+                        Err(_) => {}
                     }
-                };
-                eprintln!("[chat] model repr = {:?}", profile.model);
-                let client = betterboxd_core::llm::ChatClient::new(
-                    &profile.endpoint,
-                    &profile.api_key,
-                    &profile.model,
-                );
-                let (tmdb_key, tmdb_proxy, tmdb_lang) = {
-                    let t = &app.config.lock().unwrap().tmdb;
-                    (t.key.clone(), t.proxy.clone(), t.language.clone())
-                };
-                let cfg_snapshot = app.config.lock().unwrap().clone();
-                let ctx = ToolCtx {
-                    db: app.db.clone(),
-                    tmdb: TmdbClient::new(tmdb_key, tmdb_proxy, tmdb_lang),
-                    config: cfg_snapshot.clone(),
-                };
-
-                // 事件 → 帧
-                let tx_ev = tx.clone();
-                let on_event = move |ev: agent::AgentEvent| {
-                    let f = match ev.kind {
-                        agent::AgentEventKind::Token(t) => {
-                            serde_json::json!({"type": "token", "data": t})
-                        }
-                        agent::AgentEventKind::ToolStart { name, args } => {
-                            serde_json::json!({"type": "tool", "name": name, "args": args})
-                        }
-                        agent::AgentEventKind::ToolDone { name, ok } => {
-                            serde_json::json!({"type": "tool_done", "name": name, "ok": ok})
-                        }
-                    };
-                    let _ = tx_ev.send(Message::Text(f.to_string().into()));
-                };
-
-                let run = agent::run(
-                    &client,
-                    &cfg_snapshot,
-                    &app.db,
-                    &ToolRegistry { metas: tools::registry().metas },
-                    &ctx,
-                    &mut current.messages,
-                    &user_text,
-                    token,
-                    on_event,
-                )
-                .await;
-
-                if current.title.is_empty() && !user_text.is_empty() {
-                    current.title = user_text.chars().take(30).collect();
+                    break; // 回到空闲态
                 }
-                let _ = app.sessions.save(&current).await;
-
-                match run {
-                    Ok(summary) => {
-                        // M1 计价表未配置 → cost NULL（未计价），预算按已知值
-                        let (pid, pname, pmodel) =
-                            (current.id.clone(), profile.name.clone(), profile.model.clone());
-                        let (pt, ct) = summary.usage_tokens;
-                        let _ = app
-                            .db
-                            .call(move |c| {
-                                c.execute(
-                                    "INSERT INTO usage_records (id, session_id, profile_name,
-                                       model, prompt_tokens, completion_tokens, at, kind)
-                                     VALUES (?1,?2,?3,?4,?5,?6,?7,'llm')",
-                                    rusqlite::params![
-                                        uuid::Uuid::now_v7().to_string(),
-                                        pid, pname, pmodel,
-                                        pt as i64, ct as i64,
-                                        betterboxd_core::now()
-                                    ],
-                                )
-                            })
-                            .await;
-                        let done = serde_json::json!({
-                            "type": "done",
-                            "interrupted": summary.interrupted,
-                            "steps": summary.steps,
-                            "tokens": {"prompt": summary.usage_tokens.0,
-                                        "completion": summary.usage_tokens.1},
-                            "aborted": summary.aborted_reason,
-                        });
-                        let _ = tx.send(Message::Text(done.to_string().into()));
-                    }
-                    Err(e) => {
-                        let _ = app.sessions.save(&current).await;
-                        let _ = tx.send(Message::Text(
-                            serde_json::json!({"type": "error", "message": e})
-                                .to_string()
-                                .into(),
-                        ));
+                m = stream.next() => {
+                    match m {
+                        Some(Ok(Message::Text(t))) => {
+                            if let Ok(f) = serde_json::from_str::<serde_json::Value>(&t) {
+                                match f["type"].as_str() {
+                                    Some("interrupt") => {
+                                        if let Some(c) = cancel.lock().unwrap().as_ref() { c.cancel(); }
+                                    }
+                                    Some("user") => {
+                                        let _ = tx.send(Message::Text(
+                                            serde_json::json!({"type": "error",
+                                                "message": "当前有任务在执行，请先停止"})
+                                                .to_string().into()));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {
+                            // 连接断开：打断任务后收尾
+                            if let Some(c) = cancel.lock().unwrap().as_ref() { c.cancel(); }
+                            let _ = (&mut run_handle).await;
+                            break 'outer;
+                        }
                     }
                 }
             }
-            _ => {}
         }
     }
     drop(tx);
-    let _ = writer.await;
 }
 
 #[tokio::main]
 async fn main() {
-    let data_dir = std::path::PathBuf::from(
-        std::env::var("BB_DATA").unwrap_or_else(|_| "data".into()),
-    );
+    let data_dir =
+        std::path::PathBuf::from(std::env::var("BB_DATA").unwrap_or_else(|_| "data".into()));
     let lib_dir = data_dir.join(".betterboxd");
     std::fs::create_dir_all(lib_dir.join("sessions")).expect("创建数据目录失败");
     let config = ensure_config(&lib_dir);
@@ -266,7 +309,25 @@ async fn main() {
         .into_inner();
     let db = DbHandle::spawn(conn);
     let sessions = Arc::new(SessionStore::new(&lib_dir, db.clone()));
-    let app = Arc::new(AppState { db, sessions, config: Arc::new(Mutex::new(config)) });
+    // 客户端启动时构建一次（连接池复用）；档案切换（M2）时重建
+    let profile = config.active().expect("缺少活动模型档案").clone();
+    let client =
+        betterboxd_core::llm::ChatClient::new(&profile.endpoint, &profile.api_key, &profile.model);
+    let tmdb = TmdbClient::new(
+        config.tmdb.key.clone(),
+        config.tmdb.proxy.clone(),
+        config.tmdb.language.clone(),
+    );
+    let (pname, pmodel) = (profile.name.clone(), profile.model.clone());
+    let app = Arc::new(AppState {
+        db,
+        sessions,
+        config: Arc::new(Mutex::new(config)),
+        client,
+        tmdb,
+        profile_name: pname,
+        profile_model: pmodel,
+    });
 
     let router = Router::new()
         .route("/api/health", get(health))
@@ -288,11 +349,19 @@ async fn ws_echo(ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(|mut socket| async move {
         while let Some(Ok(Message::Text(text))) = socket.recv().await {
             let frame = serde_json::json!({"type": "token", "data": format!("回显: {text}")});
-            if socket.send(Message::Text(frame.to_string().into())).await.is_err() {
+            if socket
+                .send(Message::Text(frame.to_string().into()))
+                .await
+                .is_err()
+            {
                 return;
             }
             let done = serde_json::json!({"type": "done"});
-            if socket.send(Message::Text(done.to_string().into())).await.is_err() {
+            if socket
+                .send(Message::Text(done.to_string().into()))
+                .await
+                .is_err()
+            {
                 return;
             }
         }

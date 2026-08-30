@@ -272,7 +272,8 @@ impl ChatClient {
     pub async fn chat_stream(
         &self,
         messages: &[serde_json::Value],
-        extra: Option<&serde_json::Value>,
+        tools: Option<Value>,
+        extra_body: Option<Value>,
         cancel: &CancellationToken,
         mut on_token: impl FnMut(&str),
     ) -> Result<Outcome, String> {
@@ -282,19 +283,15 @@ impl ChatClient {
             "stream": true,
             "stream_options": {"include_usage": true},
         });
-        if let Some(Value::Object(extra_map)) = extra {
-            if let Value::Object(base) = &mut body {
-                for (k, v) in extra_map {
-                    base.insert(k.clone(), v.clone());
-                }
-            }
+        if let Some(t) = tools {
+            body["tools"] = t;
         }
-        eprintln!("[llm] body model repr = {:?}", body["model"]);
-        if std::env::var("BB_DEBUG_BODY").is_ok() {
-            let _ = std::fs::write(
-                "/tmp/bb_last_llm_body.json",
-                serde_json::to_string_pretty(&body).unwrap_or_default(),
-            );
+        if let Some(Value::Object(extra_map)) = extra_body
+            && let Value::Object(base) = &mut body
+        {
+            for (k, v) in extra_map {
+                base.insert(k.clone(), v.clone());
+            }
         }
 
         let resp = tokio::select! {
@@ -348,5 +345,14 @@ impl ChatClient {
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n { s.to_string() } else { format!("{}…", &s[..n]) }
+    if s.len() <= n {
+        return s.to_string();
+    }
+    let cut = s
+        .char_indices()
+        .map(|(i, _)| i)
+        .take_while(|&i| i <= n)
+        .last()
+        .unwrap_or(0);
+    format!("{}…", &s[..cut])
 }

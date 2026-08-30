@@ -4,7 +4,7 @@
 use crate::config::Config;
 use crate::db::DbHandle;
 use crate::tmdb::TmdbClient;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub struct ToolCtx {
     pub db: DbHandle,
@@ -93,10 +93,7 @@ pub fn registry() -> ToolRegistry {
             ToolMeta {
                 name: "get_movie_logs",
                 description: "获取某影片的全部 Log（看/评/聊混排，锚点时间倒序）。",
-                parameters: obj_schema(
-                    json!({"movie_id": {"type": "integer"}}),
-                    &["movie_id"],
-                ),
+                parameters: obj_schema(json!({"movie_id": {"type": "integer"}}), &["movie_id"]),
             },
             ToolMeta {
                 name: "run_stats",
@@ -130,11 +127,7 @@ pub fn registry() -> ToolRegistry {
 }
 
 /// 执行工具。返回值即回传给模型的 JSON 文本。
-pub async fn execute(
-    name: &str,
-    ctx: &ToolCtx,
-    args: Value,
-) -> Result<Value, String> {
+pub async fn execute(name: &str, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
     match name {
         "search_movies" => search_movies(ctx, &args).await,
         "get_movie_details" => get_movie_details(ctx, &args).await,
@@ -158,7 +151,11 @@ fn get_i64(v: &Value, k: &str) -> Option<i64> {
 async fn search_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let query = get_str(args, "query").ok_or("缺少 query")?;
     let year = get_i64(args, "year");
-    let results = ctx.tmdb.search_movie(query, year).await.map_err(|e| e.to_string())?;
+    let results = ctx
+        .tmdb
+        .search_movie(query, year)
+        .await
+        .map_err(|e| e.to_string())?;
     // 以搜索级字段建/更新条目桩（fetched_at=NULL 表示详情未拉取）
     for r in &results {
         let payload = r.to_string();
@@ -192,12 +189,17 @@ async fn get_movie_details(ctx: &ToolCtx, args: &Value) -> Result<Value, String>
                 rusqlite::params![id],
                 |r| r.get::<_, i64>(0),
             )
-            .unwrap_or(1) != 0)
+            .unwrap_or(1)
+                != 0)
         })
         .await
         .map_err(|e| e.to_string())?;
     if need_fetch {
-        let details = ctx.tmdb.movie_details(id).await.map_err(|e| e.to_string())?;
+        let details = ctx
+            .tmdb
+            .movie_details(id)
+            .await
+            .map_err(|e| e.to_string())?;
         let directors: Vec<String> = details["credits"]["crew"]
             .as_array()
             .map(|crew| {
@@ -235,7 +237,8 @@ async fn get_movie_details(ctx: &ToolCtx, args: &Value) -> Result<Value, String>
                     ],
                 )
             })
-            .await.map_err(|e| e.to_string())?;
+            .await
+            .map_err(|e| e.to_string())?;
     }
     ctx.db
         .select_json(&format!(
@@ -252,36 +255,49 @@ async fn get_movie_details(ctx: &ToolCtx, args: &Value) -> Result<Value, String>
 }
 
 async fn lookup_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
-    let mut where_ = Vec::new();
+    use crate::db::SqlVal;
+    let mut conds = Vec::new();
+    let mut vals: Vec<SqlVal> = Vec::new();
     if let Some(id) = get_i64(args, "movie_id") {
-        where_.push(format!("movie_id = {id}"));
+        conds.push("movie_id = ?");
+        vals.push(SqlVal::Int(id));
     }
     if let Some(d) = get_str(args, "date_from") {
-        where_.push(format!("watched_date >= '{}'", d.replace('\'', "")));
+        conds.push("watched_date >= ?");
+        vals.push(SqlVal::Text(d.to_string()));
     }
     if let Some(d) = get_str(args, "date_to") {
-        where_.push(format!("watched_date <= '{}'", d.replace('\'', "")));
+        conds.push("watched_date <= ?");
+        vals.push(SqlVal::Text(d.to_string()));
     }
     if let Some(l) = args.get("liked").and_then(|x| x.as_bool()) {
-        where_.push(format!("liked = {}", l as i64));
+        conds.push("liked = ?");
+        vals.push(SqlVal::Bool(l));
     }
     if let Some(t) = args.get("in_theater").and_then(|x| x.as_bool()) {
-        where_.push(format!("in_theater = {}", t as i64));
+        conds.push("in_theater = ?");
+        vals.push(SqlVal::Bool(t));
     }
-    let where_clause = if where_.is_empty() {
+    let where_clause = if conds.is_empty() {
         String::new()
     } else {
-        format!("WHERE {}", where_.join(" AND "))
+        format!("WHERE {}", conds.join(" AND "))
     };
     let limit = get_i64(args, "limit").unwrap_or(10).clamp(1, 20);
     let offset = get_i64(args, "offset").unwrap_or(0);
+    vals.push(SqlVal::Int(limit));
+    vals.push(SqlVal::Int(offset));
     let sql = format!(
         "SELECT entry_id, title_zh, title_en, watched_date, rating, in_theater, liked,
                 ticket_price_cents, private_note, rewatch_index, tags, dimensions_flat
          FROM v_diary_full {where_clause} ORDER BY watched_date DESC, created_at DESC
-         LIMIT {limit} OFFSET {offset}"
+         LIMIT ? OFFSET ?"
     );
-    let rows = ctx.db.select_json(&sql).await.map_err(|e| e.to_string())?;
+    let rows = ctx
+        .db
+        .select_json_params(sql, vals)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(json!({"count": rows.len(), "rows": rows}))
 }
 
@@ -292,7 +308,8 @@ async fn get_movie_logs(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
         .select_json(&format!(
             "SELECT kind, id, at, brief FROM v_logs WHERE movie_id = {id} ORDER BY at DESC LIMIT 50"
         ))
-        .await.map_err(|e| e.to_string())?;
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(json!({"count": rows.len(), "logs": rows}))
 }
 
@@ -306,7 +323,6 @@ async fn run_stats(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                     rusqlite::params![id.to_string()],
                     |r| r.get(0),
                 )
-                .map_err(rusqlite::Error::from)
             })
             .await
             .map_err(|_| format!("saved_query {id} 不存在"))?;
@@ -322,13 +338,13 @@ async fn run_stats(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
         )
     };
     crate::stats_guard::review_sql(&sql).map_err(|e| format!("SQL 审查未通过: {e}"))?;
-    // 无 LIMIT 自动包裹，强制 1000 行上限
-    let sql_exec = if !sql.to_lowercase().contains("limit") {
-        format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'))
-    } else {
-        sql.trim_end_matches(';').to_string()
-    };
-    let rows = ctx.db.select_json(&sql_exec).await.map_err(|e| e.to_string())?;
+    // 无条件包裹：强 1000 行上限（子串探测 LIMIT 会被 LIKE '%limit%' 骗过）
+    let sql_exec = format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'));
+    let rows = ctx
+        .db
+        .select_json(&sql_exec)
+        .await
+        .map_err(|e| e.to_string())?;
     let truncated = rows.len() >= 1000;
     Ok(json!({
         "columns": rows.first().map(|r| r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()).unwrap_or_default(),
@@ -344,9 +360,19 @@ async fn get_profile_snapshot(ctx: &ToolCtx) -> Result<Value, String> {
         let db = ctx.db.clone();
         async move { db.select_json(&sql).await }
     };
-    let total = q("SELECT COUNT(*) AS n FROM v_diary_full".into()).await.map_err(|e| e.to_string())?;
-    let this_year = q("SELECT COUNT(*) AS n FROM v_diary_full WHERE watched_date >= date('now','start of year')".into()).await.map_err(|e| e.to_string())?;
-    let avg = q("SELECT ROUND(AVG(rating),1) AS a FROM v_diary_full WHERE rating IS NOT NULL".into()).await.map_err(|e| e.to_string())?;
+    let total = q("SELECT COUNT(*) AS n FROM v_diary_full".into())
+        .await
+        .map_err(|e| e.to_string())?;
+    let this_year = q(
+        "SELECT COUNT(*) AS n FROM v_diary_full WHERE watched_date >= date('now','start of year')"
+            .into(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let avg =
+        q("SELECT ROUND(AVG(rating),1) AS a FROM v_diary_full WHERE rating IS NOT NULL".into())
+            .await
+            .map_err(|e| e.to_string())?;
     let top_genres = q("SELECT j.value AS g, COUNT(*) AS n FROM v_diary_full d, json_each(d.genres) j GROUP BY 1 ORDER BY 2 DESC LIMIT 5".into()).await.map_err(|e| e.to_string())?;
     let top_directors = q("SELECT j.value AS d, COUNT(*) AS n FROM v_diary_full d, json_each(d.directors) j GROUP BY 1 ORDER BY 2 DESC LIMIT 5".into()).await.map_err(|e| e.to_string())?;
     let top_companion = q("SELECT j.value AS c, COUNT(*) AS n FROM v_diary_full d, json_each(d.dimensions_flat) j WHERE json_extract(j.value,'$.dimension')='同伴' GROUP BY json_extract(j.value,'$.name') ORDER BY 2 DESC LIMIT 5".into()).await.map_err(|e| e.to_string())?;
@@ -368,7 +394,8 @@ async fn lookup_lists(ctx: &ToolCtx) -> Result<Value, String> {
             "SELECT list_id, name, source, ranked, COUNT(movie_id) AS members
              FROM v_lists GROUP BY list_id ORDER BY name",
         )
-        .await.map_err(|e| e.to_string())?;
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(json!({"lists": rows}))
 }
 
@@ -378,6 +405,7 @@ async fn list_saved_queries(ctx: &ToolCtx) -> Result<Value, String> {
         .select_json(
             "SELECT id, name, last_run_at FROM saved_queries ORDER BY sort_order, created_at",
         )
-        .await.map_err(|e| e.to_string())?;
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(json!({"saved_queries": rows}))
 }

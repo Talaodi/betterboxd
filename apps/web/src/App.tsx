@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Frame = {
-  type: "hello" | "token" | "tool" | "tool_done" | "usage" | "done" | "error";
+  type: "hello" | "token" | "tool" | "tool_done" | "done" | "error";
   data?: string;
   name?: string;
+  ok?: boolean;
   message?: string;
   session_id?: string;
   interrupted?: boolean;
@@ -28,7 +29,6 @@ export default function App() {
   const [streaming, setStreaming] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const accRef = useRef("");
-  const streamingRef = useRef(false);
 
   const flushAssistant = useCallback(() => {
     setMessages((ms) => {
@@ -53,6 +53,19 @@ export default function App() {
           break;
         case "tool":
           setMessages((ms) => [...ms, { role: "tool", name: f.name ?? "?" }]);
+          break;
+        case "tool_done":
+          setMessages((ms) => {
+            for (let i = ms.length - 1; i >= 0; i--) {
+              const m = ms[i];
+              if (m.role === "tool" && m.name === f.name && !("ok" in m)) {
+                const copy = [...ms];
+                copy[i] = { ...m, ok: f.ok };
+                return copy;
+              }
+            }
+            return ms;
+          });
           break;
         case "done":
           setStreaming(false);
@@ -87,14 +100,12 @@ export default function App() {
     setMessages((ms) => [...ms, { role: "user", text }]);
     setInput("");
     accRef.current = "";
-    streamingRef.current = true;
     setStreaming(true);
     wsRef.current?.send(JSON.stringify({ type: "user", text }));
   }, [input, streaming, connected]);
 
   const interrupt = useCallback(() => {
     wsRef.current?.send(JSON.stringify({ type: "interrupt" }));
-    streamingRef.current = false;
   }, []);
 
   return (

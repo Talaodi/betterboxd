@@ -335,13 +335,6 @@ impl Db {
         let conn = self.conn.lock().unwrap();
         Ok(f(&conn)?)
     }
-
-    /// 统计 SQL 安全执行入口：独立 query_only 连接（同库文件）。
-    pub fn open_stats_conn(path: &Path) -> Result<Connection, DbError> {
-        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        conn.pragma_update(None, "query_only", "ON")?;
-        Ok(conn)
-    }
 }
 
 #[cfg(test)]
@@ -591,12 +584,8 @@ impl DbHandle {
                         rusqlite::types::ValueRef::Null => Value::Null,
                         rusqlite::types::ValueRef::Integer(n) => n.into(),
                         rusqlite::types::ValueRef::Real(f) => f.into(),
-                        rusqlite::types::ValueRef::Text(t) => {
-                            String::from_utf8_lossy(t).into()
-                        }
-                        rusqlite::types::ValueRef::Blob(b) => {
-                            format!("<blob {}B>", b.len()).into()
-                        }
+                        rusqlite::types::ValueRef::Text(t) => String::from_utf8_lossy(t).into(),
+                        rusqlite::types::ValueRef::Blob(b) => format!("<blob {}B>", b.len()).into(),
                     };
                     obj.insert(col.clone(), v);
                 }
@@ -615,5 +604,69 @@ impl Db {
     /// 交给 DbHandle::spawn 前取出连接。
     pub fn into_inner(self) -> Connection {
         self.conn.into_inner().unwrap()
+    }
+
+    /// 统计连接（独立只读）。当前被参数化路径取代，保留给 M2 统计页复用。
+    #[allow(dead_code)]
+    pub fn open_stats_conn(path: &Path) -> Result<Connection, DbError> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        conn.pragma_update(None, "query_only", "ON")?;
+        Ok(conn)
+    }
+}
+
+/// 工具层参数值（避免 SQL 字符串拼接成为习惯）。
+#[derive(Debug, Clone)]
+pub enum SqlVal {
+    Text(String),
+    Int(i64),
+    Real(f64),
+    Bool(bool),
+    Null,
+}
+
+impl rusqlite::ToSql for SqlVal {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        match self {
+            SqlVal::Text(s) => s.to_sql(),
+            SqlVal::Int(n) => n.to_sql(),
+            SqlVal::Real(f) => f.to_sql(),
+            SqlVal::Bool(b) => Ok(rusqlite::types::ToSqlOutput::Owned(
+                rusqlite::types::Value::Integer(*b as i64),
+            )),
+            SqlVal::Null => rusqlite::types::Null.to_sql(),
+        }
+    }
+}
+
+impl DbHandle {
+    /// 带绑定参数的 SELECT → JSON 行。
+    pub async fn select_json_params(
+        &self,
+        sql: String,
+        vals: Vec<SqlVal>,
+    ) -> Result<Vec<serde_json::Value>, DbError> {
+        self.call(move |c| {
+            let mut st = c.prepare(&sql)?;
+            let cols: Vec<String> = st.column_names().into_iter().map(String::from).collect();
+            let mut rows = st.query(rusqlite::params_from_iter(vals))?;
+            let mut out = Vec::new();
+            while let Some(r) = rows.next()? {
+                let mut obj = serde_json::Map::new();
+                for (i, col) in cols.iter().enumerate() {
+                    let v: serde_json::Value = match r.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => serde_json::Value::Null,
+                        rusqlite::types::ValueRef::Integer(n) => n.into(),
+                        rusqlite::types::ValueRef::Real(f) => f.into(),
+                        rusqlite::types::ValueRef::Text(t) => String::from_utf8_lossy(t).into(),
+                        rusqlite::types::ValueRef::Blob(b) => format!("<blob {}B>", b.len()).into(),
+                    };
+                    obj.insert(col.clone(), v);
+                }
+                out.push(serde_json::Value::Object(obj));
+            }
+            Ok(out)
+        })
+        .await
     }
 }

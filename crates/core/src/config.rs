@@ -49,7 +49,10 @@ fn default_title_sub() -> String {
 }
 impl Default for DisplayCfg {
     fn default() -> Self {
-        Self { title_main: default_title_main(), title_sub: default_title_sub() }
+        Self {
+            title_main: default_title_main(),
+            title_sub: default_title_sub(),
+        }
     }
 }
 
@@ -91,8 +94,8 @@ pub struct Config {
 
 impl Config {
     pub fn load(path: &Path) -> Result<Config, String> {
-        let raw = std::fs::read_to_string(path)
-            .map_err(|e| format!("读取 {}: {e}", path.display()))?;
+        let raw =
+            std::fs::read_to_string(path).map_err(|e| format!("读取 {}: {e}", path.display()))?;
         toml::from_str(&raw).map_err(|e| format!("config 解析失败: {e}"))
     }
 

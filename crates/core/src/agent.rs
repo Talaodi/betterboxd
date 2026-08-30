@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::db::DbHandle;
 use crate::llm::ChatClient;
 use crate::tools::{self, ToolCtx, ToolRegistry};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 pub const MAX_STEPS: usize = 12;
@@ -57,16 +57,19 @@ pub async fn budget_check(db: &DbHandle, config: &Config) -> Result<(), String> 
     let cur = config.billing.display_currency.clone();
     let ms = month_start();
     let rows = db
-        .select_json(&format!(
-            "SELECT input_cost, output_cost, currency, at FROM usage_records
+        .select_json(
+            &"SELECT input_cost, output_cost, currency, at FROM usage_records
              WHERE currency IS NOT NULL"
-        ))
+                .to_string(),
+        )
         .await
         .map_err(|e| e.to_string())?;
     let cost = |since: Option<i64>| -> f64 {
         rows.iter()
             .filter(|r| {
-                since.map(|s| r["at"].as_i64().unwrap_or(0) >= s).unwrap_or(true)
+                since
+                    .map(|s| r["at"].as_i64().unwrap_or(0) >= s)
+                    .unwrap_or(true)
             })
             .map(|r| {
                 let c = r["input_cost"].as_f64().unwrap_or(0.0)
@@ -83,15 +86,17 @@ pub async fn budget_check(db: &DbHandle, config: &Config) -> Result<(), String> 
     };
     let month = cost(Some(ms));
     let total = cost(None);
-    if let Some(b) = config.billing.budget_monthly {
-        if month >= b {
-            return Err(format!("本月预算已耗尽（{month:.2}/{b} CNY），可在设置页调整"));
-        }
+    if let Some(b) = config.billing.budget_monthly
+        && month >= b
+    {
+        return Err(format!(
+            "本月预算已耗尽（{month:.2}/{b} CNY），可在设置页调整"
+        ));
     }
-    if let Some(b) = config.billing.budget_total {
-        if total >= b {
-            return Err(format!("累计预算已耗尽（{total:.2}/{b} CNY）"));
-        }
+    if let Some(b) = config.billing.budget_total
+        && total >= b
+    {
+        return Err(format!("累计预算已耗尽（{total:.2}/{b} CNY）"));
     }
     Ok(())
 }
@@ -129,7 +134,8 @@ pub async fn run(
     let mut steps = 0usize;
     let mut prompt_total = 0u64;
     let mut completion_total = 0u64;
-    let mut fail_streak: std::collections::HashMap<String, usize> = Default::default();
+    let mut last_fail: Option<String> = None;
+    let mut fail_streak = 0usize;
     let mut interrupted = false;
     let mut aborted_reason = None;
 
@@ -140,19 +146,37 @@ pub async fn run(
         }
         steps += 1;
 
-        let mut all_messages =
-            vec![json!({"role": "system", "content": system})];
+        let mut all_messages = vec![json!({"role": "system", "content": system})];
         all_messages.extend(messages.iter().cloned());
-        let extra = json!({
-            "tools": registry.schemas(),
-            "messages": all_messages,
-        });
+        // 采样参数从活动档案读取（M1：仅 temperature/top_p/max_tokens）
+        let mut sampling = json!({});
+        if let Ok(p) = config.active() {
+            if let Some(t) = p.temperature {
+                sampling["temperature"] = json!(t);
+            }
+            if let Some(t) = p.top_p {
+                sampling["top_p"] = json!(t);
+            }
+            if let Some(m) = p.max_output_tokens {
+                sampling["max_tokens"] = json!(m);
+            }
+        }
 
         let outcome = {
             let cancel = cancel.clone();
-            let mut emit = |t: &str| on_event(AgentEvent { kind: AgentEventKind::Token(t.into()) });
+            let mut emit = |t: &str| {
+                on_event(AgentEvent {
+                    kind: AgentEventKind::Token(t.into()),
+                })
+            };
             client
-                .chat_stream(&[], Some(&extra), &cancel, &mut emit)
+                .chat_stream(
+                    &all_messages,
+                    Some(registry.schemas()),
+                    Some(sampling.clone()),
+                    &cancel,
+                    &mut emit,
+                )
                 .await
         };
         match outcome {
@@ -170,8 +194,11 @@ pub async fn run(
             }
             Ok(o) => {
                 prompt_total += o.usage.as_ref().and_then(|u| u.prompt_tokens).unwrap_or(0);
-                completion_total +=
-                    o.usage.as_ref().and_then(|u| u.completion_tokens).unwrap_or(0);
+                completion_total += o
+                    .usage
+                    .as_ref()
+                    .and_then(|u| u.completion_tokens)
+                    .unwrap_or(0);
 
                 if o.tool_calls.is_empty() {
                     messages.push(json!({"role": "assistant", "content": o.text}));
@@ -208,27 +235,36 @@ pub async fn run(
                     });
                     let result = tools::execute(&tc.name, ctx, args).await;
                     let ok = result.is_ok();
-                    let entry = fail_streak.entry(tc.name.clone()).or_insert(0);
+                    // 严格"同工具连续失败"：成功或换工具都重置
                     if ok {
-                        *entry = 0;
+                        last_fail = None;
+                        fail_streak = 0;
+                    } else if last_fail.as_deref() == Some(tc.name.as_str()) {
+                        fail_streak += 1;
                     } else {
-                        *entry += 1;
+                        last_fail = Some(tc.name.clone());
+                        fail_streak = 1;
                     }
                     let payload = match &result {
                         Ok(v) => v.to_string(),
                         Err(e) => json!({"error": e}).to_string(),
                     };
                     on_event(AgentEvent {
-                        kind: AgentEventKind::ToolDone { name: tc.name.clone(), ok },
+                        kind: AgentEventKind::ToolDone {
+                            name: tc.name.clone(),
+                            ok,
+                        },
                     });
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": payload
                     }));
-                    if *entry >= TOOL_FAIL_BREAKER {
-                        aborted_reason =
-                            Some(format!("工具 {} 连续失败 {TOOL_FAIL_BREAKER} 次，已熔断", tc.name));
+                    if fail_streak >= TOOL_FAIL_BREAKER {
+                        aborted_reason = Some(format!(
+                            "工具 {} 连续失败 {TOOL_FAIL_BREAKER} 次，已熔断",
+                            tc.name
+                        ));
                         return Ok(RunSummary {
                             steps,
                             interrupted: false,
