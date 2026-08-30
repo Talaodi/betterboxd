@@ -151,6 +151,7 @@ dependencies = [
  "betterboxd-core",
  "tauri",
  "tauri-build",
+ "tokio",
 ]
 
 [[package]]

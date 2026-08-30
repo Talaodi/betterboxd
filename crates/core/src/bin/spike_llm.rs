@@ -3,7 +3,7 @@
 //! 用法：`set -a; source spikes/local.env; cargo run -p betterboxd-core --bin spike_llm`
 
 use futures_util::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn client() -> reqwest::Client {
     reqwest::Client::new()
@@ -24,14 +24,21 @@ async fn plain_chat(ep: &str, key: &str, model: &str) -> Result<Value, String> {
             "model": model,
             "messages": [{"role":"user","content":"回复两个字：收到"}]
         }))
-        .send().await.map_err(|e| format!("网络: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("网络: {e}"))?;
     let status = resp.status();
-    let body: Value = resp.json().await.map_err(|e| format!("非 JSON 响应: {e}"))?;
+    let body: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("非 JSON 响应: {e}"))?;
     if !status.is_success() {
         return Err(format!("HTTP {status}: {body}"));
     }
     let text = body["choices"][0]["message"]["content"]
-        .as_str().unwrap_or("(空)").to_string();
+        .as_str()
+        .unwrap_or("(空)")
+        .to_string();
     Ok(json!({"text": text, "usage_present": body["usage"].is_object()}))
 }
 
@@ -45,7 +52,9 @@ async fn stream_chat(ep: &str, key: &str, model: &str) -> Result<bool, String> {
             "stream_options": {"include_usage": true},
             "messages": [{"role":"user","content":"数到三"}]
         }))
-        .send().await.map_err(|e| format!("网络: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("网络: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
@@ -56,10 +65,18 @@ async fn stream_chat(ep: &str, key: &str, model: &str) -> Result<bool, String> {
     while let Some(Ok(bytes)) = stream.next().await {
         buf.extend_from_slice(&bytes);
         let s = String::from_utf8_lossy(&buf);
-        if s.contains("\"delta\"") || s.contains("\"content\"") { got_chunk = true; }
-        if s.contains("\"usage\"") { got_usage = true; }
-        if got_chunk && got_usage { break; }
-        if buf.len() > 64 * 1024 { break; }
+        if s.contains("\"delta\"") || s.contains("\"content\"") {
+            got_chunk = true;
+        }
+        if s.contains("\"usage\"") {
+            got_usage = true;
+        }
+        if got_chunk && got_usage {
+            break;
+        }
+        if buf.len() > 64 * 1024 {
+            break;
+        }
     }
     let _ = buf;
     Ok(got_chunk && got_usage)
@@ -95,7 +112,10 @@ async fn tool_call(ep: &str, key: &str, model: &str) -> Result<bool, String> {
     }
     let body: Value = resp.json().await.map_err(|e| e.to_string())?;
     let msg = &body["choices"][0]["message"];
-    Ok(msg["tool_calls"].as_array().map(|a| !a.is_empty()).unwrap_or(false))
+    Ok(msg["tool_calls"]
+        .as_array()
+        .map(|a| !a.is_empty())
+        .unwrap_or(false))
 }
 
 #[tokio::main]
@@ -103,7 +123,10 @@ async fn main() {
     let (ep, key, model) = envs();
     println!("端点: {ep}  模型: {model}\n");
     match plain_chat(&ep, &key, &model).await {
-        Ok(v) => println!("① 非流式对话: ✅ 回复={:?} usage={}", v["text"], v["usage_present"]),
+        Ok(v) => println!(
+            "① 非流式对话: ✅ 回复={:?} usage={}",
+            v["text"], v["usage_present"]
+        ),
         Err(e) => println!("① 非流式对话: ❌ {e}"),
     }
     match stream_chat(&ep, &key, &model).await {
@@ -113,7 +136,9 @@ async fn main() {
     }
     match tool_call(&ep, &key, &model).await {
         Ok(true) => println!("③ tool_calls: ✅ —— Agent 完整形态可用"),
-        Ok(false) => println!("③ tool_calls: ⚠ 未产生工具调用（可能不支持，Agent 降级为纯对话+引导命令）"),
+        Ok(false) => {
+            println!("③ tool_calls: ⚠ 未产生工具调用（可能不支持，Agent 降级为纯对话+引导命令）")
+        }
         Err(e) => println!("③ tool_calls: ❌ {e}"),
     }
 }

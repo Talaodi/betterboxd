@@ -8,6 +8,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["time"] }
 betterboxd-core = { path = "../../../crates/core" }
 
 [lib]

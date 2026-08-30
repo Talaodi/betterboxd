@@ -125,7 +125,11 @@ impl ToolCallAccumulator {
     pub fn finish(self) -> Vec<CompletedToolCall> {
         self.slots
             .into_values()
-            .map(|s| CompletedToolCall { id: s.id, name: s.name, arguments: s.arguments })
+            .map(|s| CompletedToolCall {
+                id: s.id,
+                name: s.name,
+                arguments: s.arguments,
+            })
             .collect()
     }
 }
