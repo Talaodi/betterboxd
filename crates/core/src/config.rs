@@ -34,7 +34,7 @@ fn default_lang() -> String {
     "zh-CN".into()
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct DisplayCfg {
     #[serde(default = "default_title_main")]
     pub title_main: String, // zh | en | original | hide
@@ -46,6 +46,11 @@ fn default_title_main() -> String {
 }
 fn default_title_sub() -> String {
     "original".into()
+}
+impl Default for DisplayCfg {
+    fn default() -> Self {
+        Self { title_main: default_title_main(), title_sub: default_title_sub() }
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
