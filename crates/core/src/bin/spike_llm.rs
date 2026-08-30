@@ -51,9 +51,8 @@ async fn stream_chat(ep: &str, key: &str, model: &str) -> Result<bool, String> {
     }
     let mut got_chunk = false;
     let mut got_usage = false;
-    let mut buf = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
     let mut stream = resp.bytes_stream();
-    use tokio::io::AsyncReadExt;
     while let Some(Ok(bytes)) = stream.next().await {
         buf.extend_from_slice(&bytes);
         let s = String::from_utf8_lossy(&buf);

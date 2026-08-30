@@ -4,10 +4,9 @@
 #[tokio::main]
 async fn main() {
     let key = std::env::var("TMDB_KEY").expect("缺少 TMDB_KEY 环境变量");
-    let url = "https://api.themoviedb.org/3/search/movie";
+    let url = "https://api.themoviedb.org/3/search/movie?query=Inception&language=zh-CN";
     let resp = reqwest::Client::new()
         .get(url)
-        .query(&[("query", "Inception"), ("language", "zh-CN")])
         .header("Authorization", format!("Bearer {key}"))
         .send()
         .await
