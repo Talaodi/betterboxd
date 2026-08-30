@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Letterboxd 风格色板（design.md §7.11） */
+:root {
+  --bb-bg: #14181c;
+  --bb-surface: #1b222b;
+  --bb-raise: #2c3440;
+  --bb-green: #00e054;
+  --bb-blue: #40bcf4;
+  --bb-orange: #ff8000;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--bb-bg);
+  color: #dfe7ef;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}

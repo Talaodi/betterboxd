@@ -1,0 +1,15 @@
+[package]
+name = "betterboxd-gui"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+betterboxd-core = { path = "../../../crates/core" }
+
+[lib]
+name = "betterboxd_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
