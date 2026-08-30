@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
+use serde_json::Value;
 
 /// 从字节流中切出的 SSE 事件（仅 data 行；注释/空行已忽略）。
 #[derive(Debug, Clone, PartialEq)]
@@ -232,4 +233,120 @@ data: [DONE]\n\n";
         assert!(tools[0].contains("\"t1\""));
         assert!(tools[1].contains("\"t2\""));
     }
+}
+
+// ============ 正式客户端（M1）============
+
+use futures_util::StreamExt;
+use tokio_util::sync::CancellationToken;
+
+#[derive(Debug, Clone)]
+pub struct ChatClient {
+    http: reqwest::Client,
+    endpoint: String,
+    api_key: String,
+    model: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Outcome {
+    pub text: String,
+    pub tool_calls: Vec<CompletedToolCall>,
+    pub usage: Option<Usage>,
+    pub finish_reason: Option<String>,
+    pub interrupted: bool,
+}
+
+impl ChatClient {
+    pub fn new(endpoint: &str, api_key: &str, model: &str) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            endpoint: endpoint.trim_end_matches('/').to_string(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    /// 流式对话。`extra` 合并进请求体（tools/temperature/max_tokens 等）。
+    /// on_token 在每个内容分片到达时同步回调（用于 WS 推送）。
+    pub async fn chat_stream(
+        &self,
+        messages: &[serde_json::Value],
+        extra: Option<&serde_json::Value>,
+        cancel: &CancellationToken,
+        mut on_token: impl FnMut(&str),
+    ) -> Result<Outcome, String> {
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": true,
+            "stream_options": {"include_usage": true},
+        });
+        if let Some(Value::Object(extra_map)) = extra {
+            if let Value::Object(base) = &mut body {
+                for (k, v) in extra_map {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        eprintln!("[llm] body model repr = {:?}", body["model"]);
+        if std::env::var("BB_DEBUG_BODY").is_ok() {
+            let _ = std::fs::write(
+                "/tmp/bb_last_llm_body.json",
+                serde_json::to_string_pretty(&body).unwrap_or_default(),
+            );
+        }
+
+        let resp = tokio::select! {
+            _ = cancel.cancelled() => return Ok(Outcome { interrupted: true, ..Default::default() }),
+            r = self.http
+                .post(format!("{}/chat/completions", self.endpoint))
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send() => r.map_err(|e| format!("LLM 网络错误: {e}"))?,
+        };
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("LLM HTTP {status}: {}", truncate(&body, 300)));
+        }
+
+        let mut out = Outcome::default();
+        let mut buf = SseBuffer::default();
+        let mut acc = ToolCallAccumulator::default();
+        let mut stream = resp.bytes_stream();
+
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    out.interrupted = true;
+                    out.tool_calls = acc.finish();
+                    return Ok(out);
+                }
+                chunk = stream.next() => {
+                    let Some(bytes) = chunk else { break };
+                    let bytes = bytes.map_err(|e| format!("流读取错误: {e}"))?;
+                    for ev in buf.feed(&bytes) {
+                        if ev.data == "[DONE]" { out.tool_calls = acc.finish(); return Ok(out); }
+                        let Ok(chunk) = serde_json::from_str::<ChatChunk>(&ev.data) else { continue };
+                        if let Some(u) = chunk.usage { out.usage = Some(u); }
+                        for choice in chunk.choices {
+                            if choice.finish_reason.is_some() { out.finish_reason = choice.finish_reason; }
+                            if let Some(t) = choice.delta.content {
+                                on_token(&t);
+                                out.text.push_str(&t);
+                            }
+                            acc.feed(&choice.delta.tool_calls);
+                        }
+                    }
+                }
+            }
+        }
+        out.tool_calls = acc.finish();
+        Ok(out)
+    }
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.len() <= n { s.to_string() } else { format!("{}…", &s[..n]) }
 }

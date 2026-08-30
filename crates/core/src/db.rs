@@ -535,3 +535,85 @@ mod tests {
         assert_eq!(companions.len(), 2, "同维度多值：{flat}");
     }
 }
+
+// ============ DB 专用线程（M1）：异步安全访问 ============
+
+use tokio::sync::oneshot;
+
+type Job = Box<dyn FnOnce(&Connection) + Send>;
+
+/// 克隆型句柄：所有查询串行执行在专用线程上，异步侧 await 结果。
+#[derive(Clone)]
+pub struct DbHandle {
+    tx: tokio::sync::mpsc::UnboundedSender<Job>,
+}
+
+impl DbHandle {
+    pub fn spawn(conn: Connection) -> Self {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Job>();
+        std::thread::spawn(move || {
+            while let Some(job) = rx.blocking_recv() {
+                job(&conn);
+            }
+        });
+        Self { tx }
+    }
+
+    pub async fn call<R, F>(&self, f: F) -> Result<R, DbError>
+    where
+        R: Send + 'static,
+        F: FnOnce(&Connection) -> rusqlite::Result<R> + Send + 'static,
+    {
+        let (otx, orx) = oneshot::channel();
+        self.tx
+            .send(Box::new(move |conn| {
+                let _ = otx.send(f(conn));
+            }))
+            .map_err(|_| DbError::Io(std::io::Error::other("DB 线程已关闭")))?;
+        match orx.await {
+            Ok(r) => r.map_err(DbError::Sqlite),
+            Err(_) => Err(DbError::Io(std::io::Error::other("DB 任务被丢弃"))),
+        }
+    }
+
+    /// 任意只读 SELECT → JSON 行数组（供工具层与统计）。
+    pub async fn select_json(&self, sql: &str) -> Result<Vec<serde_json::Value>, DbError> {
+        let sql = sql.to_string();
+        self.call(move |c| {
+            let mut st = c.prepare(&sql)?;
+            let cols: Vec<String> = st.column_names().into_iter().map(String::from).collect();
+            let mut rows = st.query([])?;
+            let mut out = Vec::new();
+            while let Some(r) = rows.next()? {
+                let mut obj = serde_json::Map::new();
+                for (i, col) in cols.iter().enumerate() {
+                    let v: serde_json::Value = match r.get_ref(i)? {
+                        rusqlite::types::ValueRef::Null => Value::Null,
+                        rusqlite::types::ValueRef::Integer(n) => n.into(),
+                        rusqlite::types::ValueRef::Real(f) => f.into(),
+                        rusqlite::types::ValueRef::Text(t) => {
+                            String::from_utf8_lossy(t).into()
+                        }
+                        rusqlite::types::ValueRef::Blob(b) => {
+                            format!("<blob {}B>", b.len()).into()
+                        }
+                    };
+                    obj.insert(col.clone(), v);
+                }
+                out.push(Value::Object(obj));
+            }
+            Ok(out)
+        })
+        .await
+    }
+}
+
+use serde_json::Value as JsonValue;
+type Value = JsonValue;
+
+impl Db {
+    /// 交给 DbHandle::spawn 前取出连接。
+    pub fn into_inner(self) -> Connection {
+        self.conn.into_inner().unwrap()
+    }
+}

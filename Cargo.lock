@@ -140,10 +140,14 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "betterboxd-core",
+ "futures-util",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower-http",
+ "uuid",
 ]
 
 [[package]]
