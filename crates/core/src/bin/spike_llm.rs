@@ -2,6 +2,7 @@
 //! 依次验证：① 非流式对话 ② 流式 + usage ③ tool_calls 支持。
 //! 用法：`set -a; source spikes/local.env; cargo run -p betterboxd-core --bin spike_llm`
 
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 
 fn client() -> reqwest::Client {

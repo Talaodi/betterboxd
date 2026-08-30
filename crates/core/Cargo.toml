@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
+futures-util = "0.3.34"
 reqwest = { version = "0.13.4", features = ["json", "stream"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
