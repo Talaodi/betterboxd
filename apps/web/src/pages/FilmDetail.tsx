@@ -60,10 +60,14 @@ export default function FilmDetail() {
 
         {/* 中：标题与信息（LB 式排版） */}
         <div className="min-w-0 flex-1">
-          <h1 className="text-4xl font-bold leading-tight">{m.title_main}</h1>
-          {m.title_sub && m.title_sub !== m.title_main && (
-            <p className="mt-1 text-lg italic text-[#5a6b7c]">({m.title_sub})</p>
-          )}
+          <h1 className="text-4xl font-bold leading-tight">
+            {m.title_main}
+            {m.title_sub && m.title_sub !== m.title_main && (
+              <span className="ml-3 font-normal italic text-[#5a6b7c]">
+                ({m.title_sub})
+              </span>
+            )}
+          </h1>
           <p className="mt-3 text-sm text-[#8899aa]">
             {[
               m.year,

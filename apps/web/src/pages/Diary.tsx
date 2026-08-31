@@ -86,7 +86,7 @@ export default function Diary() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-base font-semibold">
                     {r.title_main}
-                    <span className="ml-2 text-sm font-normal italic text-[#5a6b7c]">
+                    <span className="ml-2 font-normal italic text-[#5a6b7c]">
                       ({r.title_sub})
                     </span>
                   </div>
