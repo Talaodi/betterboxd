@@ -29,7 +29,7 @@ struct AppState {
     db: DbHandle,
     sessions: Arc<SessionStore>,
     config: Arc<Mutex<Config>>,
-    client: betterboxd_core::llm::ChatClient,
+    client: Option<betterboxd_core::llm::ChatClient>,
     tmdb: TmdbClient,
     profile_name: String,
     profile_model: String,
@@ -157,7 +157,15 @@ async fn handle_chat(app: App, socket: WebSocket) {
                 continue;
             }
         };
-        let client = app.client.clone();
+        let Some(client) = app.client.clone() else {
+            let _ = tx.send(Message::Text(
+                serde_json::json!({"type": "error",
+                    "message": "未配置模型档案，请先在设置页或 config.toml 配置"})
+                .to_string()
+                .into(),
+            ));
+            continue;
+        };
         let tmdb = app.tmdb.clone();
         let cfg_snapshot = app.config.lock().unwrap().clone();
         let mut task_session = current.clone();
@@ -311,8 +319,11 @@ async fn main() {
     let sessions = Arc::new(SessionStore::new(&lib_dir, db.clone()));
     // 客户端启动时构建一次（连接池复用）；档案切换（M2）时重建
     let profile = config.active().expect("缺少活动模型档案").clone();
-    let client =
-        betterboxd_core::llm::ChatClient::new(&profile.endpoint, &profile.api_key, &profile.model);
+    let client = Some(betterboxd_core::llm::ChatClient::new(
+        &profile.endpoint,
+        &profile.api_key,
+        &profile.model,
+    ));
     let tmdb = TmdbClient::new(
         config.tmdb.key.clone(),
         config.tmdb.proxy.clone(),

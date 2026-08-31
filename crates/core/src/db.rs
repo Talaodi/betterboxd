@@ -278,6 +278,19 @@ FROM canons c JOIN canon_films f ON f.canon_key = c.key;
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
 const MIGRATIONS: &[(i64, &str)] = &[(1, M001)];
 
+/// 顺序应用未执行的迁移（自由函数，供种子/测试复用）。
+pub fn apply_migrations(conn: &Connection) -> Result<(), DbError> {
+    let current: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    for &(version, sql) in MIGRATIONS {
+        if version > current {
+            conn.execute_batch(&format!(
+                "BEGIN;\n{sql}\nPRAGMA user_version = {version};\nCOMMIT;"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
 /// 存储错误。
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -668,5 +681,232 @@ impl DbHandle {
             Ok(out)
         })
         .await
+    }
+}
+
+// ============ 影片级状态重算（Action 账目 → 缓存列）============
+
+/// 影片级状态重算规则（design.md 定稿）：
+/// - my_rating/liked：target=movie 的断言 Action，按 at 倒序取第一条
+///   source ∈ {edit,agent,standalone} 且 changes 含该字段的**新值**；
+///   带 ref_id 的断言若引用的条目/影评已被删除（撤销语义）则跳过；
+/// - watched：派生（存在 Diary 条目或 Review 即真）；
+/// - in_watchlist：状态量，任意 source 的最后一条变更生效
+///   （system 自动消除是合法变更）。
+pub fn recompute_movie_state(conn: &Connection, movie_id: i64) -> rusqlite::Result<()> {
+    let pick = |field: &str| -> rusqlite::Result<Option<i64>> {
+        let mut st = conn.prepare(
+            "SELECT json_extract(changes_json, ?2), ref_id
+             FROM actions
+             WHERE movie_id = ?1 AND target = 'movie'
+               AND source IN ('edit','agent','standalone')
+               AND json_extract(changes_json, ?2) IS NOT NULL
+             ORDER BY at DESC",
+        )?;
+        let rows = st.query_map(rusqlite::params![movie_id, format!("$.{field}[1]")], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        for row in rows {
+            let (new_val, ref_id) = row?;
+            if let Some(rid) = ref_id {
+                // 撤销检查：引用的条目/影评必须仍存活
+                let alive: i64 = conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM diary_entries WHERE id=?1)
+                              + EXISTS(SELECT 1 FROM reviews WHERE id=?1)",
+                        rusqlite::params![rid],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if alive == 0 {
+                    continue; // 已被删除，跳过该断言
+                }
+            }
+            return Ok(Some(new_val));
+        }
+        Ok(None)
+    };
+
+    let my_rating: Option<i64> = pick("my_rating")?;
+    let liked: Option<i64> = pick("liked")?;
+    let watched: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM diary_entries WHERE movie_id=?1)
+              + EXISTS(SELECT 1 FROM reviews WHERE movie_id=?1) > 0",
+        rusqlite::params![movie_id],
+        |r| r.get(0),
+    )?;
+    // in_watchlist：最后一条变更（含 system），at 倒序
+    let in_watchlist: Option<i64> = conn
+        .query_row(
+            "SELECT json_extract(changes_json, '$.in_watchlist[1]')
+             FROM actions
+             WHERE movie_id=?1 AND target='movie'
+               AND json_extract(changes_json,'$.in_watchlist[1]') IS NOT NULL
+             ORDER BY at DESC LIMIT 1",
+            rusqlite::params![movie_id],
+            |r| r.get(0),
+        )
+        .ok();
+
+    conn.execute(
+        "UPDATE movies SET my_rating=?2, liked=COALESCE(?3, 0), watched=?4,
+           in_watchlist=COALESCE(?5, in_watchlist) WHERE tmdb_id=?1",
+        rusqlite::params![movie_id, my_rating, liked, watched, in_watchlist],
+    )?;
+    Ok(())
+}
+
+/// 全量重算（诊断向导/种子数据用）。
+pub fn recompute_all_movie_states(conn: &Connection) -> rusqlite::Result<()> {
+    let ids: Vec<i64> = {
+        let mut st = conn.prepare("SELECT tmdb_id FROM movies")?;
+        st.query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    for id in ids {
+        recompute_movie_state(conn, id)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+    use rusqlite::params;
+
+    fn mk_movie(c: &Connection, id: i64) {
+        c.execute(
+            "INSERT INTO movies (tmdb_id, title_original, updated_at) VALUES (?1,'T',1)",
+            params![id],
+        )
+        .unwrap();
+    }
+    fn mk_entry(c: &Connection, id: &str, movie: i64, rating: Option<i64>) {
+        c.execute(
+            "INSERT INTO diary_entries (id, movie_id, watched_date, rating, created_at, updated_at)
+                   VALUES (?1,?2,'2026-08-15',?3,1,1)",
+            params![id, movie, rating],
+        )
+        .unwrap();
+    }
+    fn assert_action(
+        c: &Connection,
+        id: &str,
+        movie: i64,
+        at: i64,
+        src: &str,
+        ref_id: Option<&str>,
+        field: &str,
+        old: Option<i64>,
+        new: i64,
+    ) {
+        let changes = serde_json::json!({ field: [old, new] }).to_string();
+        c.execute("INSERT INTO actions (id, movie_id, target, target_id, at, source, ref_id, changes_json)
+                   VALUES (?1,?2,'movie',?2,?3,?4,?5,?6)",
+                  params![id, movie, at, src, ref_id, changes]).unwrap();
+    }
+
+    #[test]
+    fn recompute_follows_rules() {
+        let c = Connection::open_in_memory().unwrap();
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        crate::db::apply_migrations(&c).unwrap();
+        mk_movie(&c, 1);
+
+        // 3 月条目断言 88（edit）→ 6 月独立改分 85（standalone）→ 最终 85
+        mk_entry(&c, "e1", 1, Some(88));
+        assert_action(&c, "a1", 1, 100, "edit", Some("e1"), "my_rating", None, 88);
+        assert_action(
+            &c,
+            "a2",
+            1,
+            200,
+            "standalone",
+            None,
+            "my_rating",
+            Some(88),
+            85,
+        );
+        recompute_movie_state(&c, 1).unwrap();
+        let (mr, watched): (Option<i64>, i64) = c
+            .query_row(
+                "SELECT my_rating, watched FROM movies WHERE tmdb_id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((mr, watched), (Some(85), 1));
+
+        // 8 月建 Review 断言 95（edit, ref=review）→ 最终 95
+        c.execute(
+            "INSERT INTO reviews (id, movie_id, body_md, rating, created_at, updated_at)
+                   VALUES ('r1',1,'…',95,300,300)",
+            [],
+        )
+        .unwrap();
+        assert_action(
+            &c,
+            "a3",
+            1,
+            300,
+            "edit",
+            Some("r1"),
+            "my_rating",
+            Some(85),
+            95,
+        );
+        recompute_movie_state(&c, 1).unwrap();
+        let mr: i64 = c
+            .query_row("SELECT my_rating FROM movies WHERE tmdb_id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(mr, 95);
+
+        // import 断言不计入：600 时导入旧档断言 60 → 仍 95
+        assert_action(&c, "a4", 1, 600, "import", None, "my_rating", Some(95), 60);
+        recompute_movie_state(&c, 1).unwrap();
+        let mr: i64 = c
+            .query_row("SELECT my_rating FROM movies WHERE tmdb_id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(mr, 95);
+
+        // 删除 Review（撤销 r1 断言）→ 回退到 85（a2）
+        c.execute("DELETE FROM reviews WHERE id='r1'", []).unwrap();
+        c.execute(
+            "INSERT INTO actions (id, movie_id, target, target_id, at, source, changes_json)
+                   VALUES ('a5',1,'review','r1',700,'edit','{\"deleted\":[false,true]}')",
+            [],
+        )
+        .unwrap();
+        recompute_movie_state(&c, 1).unwrap();
+        let mr: i64 = c
+            .query_row("SELECT my_rating FROM movies WHERE tmdb_id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(mr, 85);
+
+        // liked：变更才传播
+        assert_action(&c, "a6", 1, 800, "edit", None, "liked", Some(0), 1);
+        recompute_movie_state(&c, 1).unwrap();
+        let liked: i64 = c
+            .query_row("SELECT liked FROM movies WHERE tmdb_id=1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(liked, 1);
+
+        // in_watchlist：system 自动消除生效
+        c.execute("UPDATE movies SET in_watchlist=1 WHERE tmdb_id=1", [])
+            .unwrap();
+        assert_action(&c, "a7", 1, 900, "system", None, "in_watchlist", Some(1), 0);
+        recompute_movie_state(&c, 1).unwrap();
+        let iw: i64 = c
+            .query_row("SELECT in_watchlist FROM movies WHERE tmdb_id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(iw, 0);
     }
 }
