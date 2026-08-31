@@ -819,7 +819,7 @@ async fn handle_chat(
     });
 
     // 会话恢复优先级：session_id 精确恢复 > 同 scope 最近会话 > 新建
-    let mut current = if fresh {
+    let resumed = if fresh {
         None
     } else if let Some(sid) = &ws_session_id {
         app.sessions.load(sid)
@@ -827,7 +827,7 @@ async fn handle_chat(
         let scope = if ws_movie_id.is_some() { "movie" } else { "global" };
         app.sessions.find_latest(scope, ws_movie_id).await
     };
-    let mut current = current.unwrap_or_else(|| match ws_movie_id {
+    let mut current = resumed.unwrap_or_else(|| match ws_movie_id {
         Some(mid) => app.sessions.new_session("movie", Some(mid), None, None),
         None => app.sessions.new_session("global", None, None, None),
     });
