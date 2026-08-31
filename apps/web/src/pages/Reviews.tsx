@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getJson, sendJson } from "../api";
 import { StarsDisplay } from "../components/Stars";
-import ReactMarkdown from "react-markdown";
+import { Markdown } from "../components/ChatPanel";
 
 type ReviewRow = {
   review_id: string;
@@ -93,11 +93,10 @@ export default function Reviews() {
               </div>
               <div
                 className={
-                  "mt-3 prose prose-invert prose-sm max-w-none text-[#c8d2dc] [&_p]:mb-2 [&_strong]:text-white " +
-                  (open ? "" : "max-h-[120px] overflow-hidden")
+                  "mt-3 max-w-none text-[#c8d2dc] " + (open ? "" : "max-h-[120px] overflow-hidden")
                 }
               >
-                <ReactMarkdown>{r.body_md}</ReactMarkdown>
+                <Markdown>{r.body_md}</Markdown>
               </div>
               <button
                 className="mt-2 text-xs text-[#40bcf4]"

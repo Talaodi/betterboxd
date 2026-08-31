@@ -4,6 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../chatStore";
 import ConfirmCard from "./ConfirmCard";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+/** markdown 渲染容器：GFM 表格 + 暗色主题样式（表格/代码块/链接）。 */
+export function Markdown({ children }: { children: string }) {
+  return (
+    <div className="prose prose-invert prose-sm max-w-none [&_a]:text-[#40bcf4] [&_code]:rounded [&_code]:bg-[#14181c] [&_code]:px-1 [&_li]:mb-0.5 [&_p]:mb-1 [&_strong]:text-white [&_table]:my-2 [&_table]:w-full [&_table]:text-xs [&_table]:leading-5 [&_td]:border [&_td]:border-[#2c3440] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[#2c3440] [&_th]:bg-[#1b222b] [&_th]:px-2 [&_th]:py-1">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+    </div>
+  );
+}
 
 export default function ChatPanel({
   movieId,
@@ -80,9 +90,7 @@ export default function ChatPanel({
                 }
               >
                 {m.role === "assistant" ? (
-                  <div className="prose prose-invert prose-sm max-w-none [&_p]:mb-1 [&_strong]:text-white">
-                    <ReactMarkdown>{m.text}</ReactMarkdown>
-                  </div>
+                  <Markdown>{m.text}</Markdown>
                 ) : (
                   m.text
                 )}

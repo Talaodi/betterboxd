@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getJson } from "../api";
 import Poster from "../components/Poster";
-import ReactMarkdown from "react-markdown";
+import { Markdown } from "../components/ChatPanel";
 
 type ChatRow = {
   id: string;
@@ -112,9 +112,7 @@ export default function Chats() {
                       }
                     >
                       {m.role === "assistant" ? (
-                        <div className="prose prose-invert prose-sm max-w-none [&_p]:mb-1">
-                          <ReactMarkdown>{m.text}</ReactMarkdown>
-                        </div>
+                        <Markdown>{m.text}</Markdown>
                       ) : (
                         m.text
                       )}
