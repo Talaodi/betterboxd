@@ -135,3 +135,19 @@ impl TmdbClient {
             .map_err(|e| e.to_string())
     }
 }
+
+impl TmdbClient {
+    /// 下载任意 TMDB 图片 URL（海报/剧照共用）。
+    pub async fn download_image(&self, url: &str) -> Result<Vec<u8>, String> {
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("图片下载失败: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("图片下载 HTTP {}", resp.status()));
+        }
+        resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+    }
+}

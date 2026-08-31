@@ -372,7 +372,37 @@ async fn tmdb_search(
     }
 }
 
-/// 海报：本地有则直接回；无则按 movies.posters 首选路径下载后落盘再回。
+/// 横向剧照（详情页 hero 背景）：w1280 档，同海报的下载-落盘-回源模式。
+async fn backdrop(State(app): State<App>, AxPath(id): AxPath<i64>) -> Response {
+    let file = app.posters_dir.join(format!("{id}_bg.jpg"));
+    if let Ok(bytes) = std::fs::read(&file) {
+        return ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], bytes).into_response();
+    }
+    let bp: Option<String> = app
+        .db
+        .select_json(&format!(
+            "SELECT backdrop_path FROM v_movies WHERE tmdb_id={id}"
+        ))
+        .await
+        .ok()
+        .and_then(|rows| rows.first().cloned())
+        .and_then(|r| r["backdrop_path"].as_str().map(String::from));
+    let Some(bp) = bp.filter(|p| !p.is_empty()) else {
+        return (StatusCode::NOT_FOUND, "无剧照").into_response();
+    };
+    match app
+        .tmdb
+        .download_image(&format!("https://image.tmdb.org/t/p/w1280{bp}"))
+        .await
+    {
+        Ok(bytes) => {
+            let _ = std::fs::write(&file, &bytes);
+            ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], bytes).into_response()
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
+    }
+}
+
 async fn poster(State(app): State<App>, AxPath(id): AxPath<i64>) -> Response {
     let file = app.posters_dir.join(format!("{id}.jpg"));
     if let Ok(bytes) = std::fs::read(&file) {
@@ -704,6 +734,7 @@ async fn main() {
         )
         .route("/api/tmdb/search", get(tmdb_search))
         .route("/api/poster/{id}", get(poster))
+        .route("/api/backdrop/{id}", get(backdrop))
         .route("/api/usage/summary", get(usage_summary))
         .route("/api/tools/execute", post(tools_execute))
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))

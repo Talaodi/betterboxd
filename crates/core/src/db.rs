@@ -311,8 +311,28 @@ FROM diary_entries e
 JOIN movies m ON m.tmdb_id = e.movie_id;
 "#;
 
+/// M003：backdrop_path（横向剧照，详情页 hero 用）。
+const M003: &str = r#"
+ALTER TABLE movies ADD COLUMN backdrop_path TEXT;
+DROP VIEW v_movies;
+CREATE VIEW v_movies AS
+SELECT tmdb_id,
+       title_zh, title_en, title_original,
+       COALESCE(title_zh, title_original, title_en)      AS title_main,
+       COALESCE(title_original, title_en, title_zh)      AS title_sub,
+       release_date,
+       substr(release_date, 1, 4)                        AS year,
+       runtime, original_language, spoken_languages,
+       directors, genres, posters, tagline, overview,
+       backdrop_path,
+       lb_rating, lb_votes,
+       my_rating, watched, in_watchlist, liked,
+       fetched_at, updated_at
+FROM movies;
+"#;
+
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
-const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002)];
+const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003)];
 
 /// 当前最新 schema 版本（测试与启动校验用）。
 pub fn latest_version() -> i64 {

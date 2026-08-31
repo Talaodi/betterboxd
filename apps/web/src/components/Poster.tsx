@@ -19,7 +19,9 @@ export default function Poster({
       ? "w-12 h-[72px]"
       : size === "grid"
         ? "w-full aspect-[2/3]"
-        : "w-[300px] h-[450px]";
+        : size === "detail"
+          ? "w-[210px] h-[315px]"
+          : "w-[300px] h-[450px]";
   const hue = [...title].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
   if (failed) {
     return (

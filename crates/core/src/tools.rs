@@ -1156,13 +1156,14 @@ pub async fn ensure_movie_details(
             .collect()
     }).unwrap_or_default();
     let poster_owned = details["poster_path"].as_str().unwrap_or("").to_string();
+    let backdrop_owned = details["backdrop_path"].as_str().unwrap_or("").to_string();
     let runtime = details["runtime"].as_i64();
     db.call(move |c| {
         c.execute(
             "UPDATE movies SET directors=?2, genres=?3, runtime=COALESCE(?4, runtime),
                tagline=COALESCE(json_extract(?5,'$.tagline'), tagline),
                overview=COALESCE(json_extract(?5,'$.overview'), overview),
-               posters=?6, fetched_at=?7 WHERE tmdb_id=?1",
+               posters=?6, backdrop_path=?8, fetched_at=?7 WHERE tmdb_id=?1",
             rusqlite::params![
                 movie_id,
                 serde_json::to_string(&directors).unwrap(),
@@ -1170,7 +1171,8 @@ pub async fn ensure_movie_details(
                 runtime,
                 details.to_string(),
                 serde_json::to_string(&vec![poster_owned]).unwrap(),
-                crate::now()
+                crate::now(),
+                backdrop_owned,
             ],
         )
     })
