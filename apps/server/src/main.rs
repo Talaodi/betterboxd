@@ -136,10 +136,10 @@ impl betterboxd_core::tools::ConfirmGate for WsGate {
             "args": pending_req.args,
         });
         let (otx, orx) = tokio::sync::oneshot::channel();
-        self.pending.lock().unwrap().insert(
-            call_id.clone(),
-            PendingRoute { tx: otx },
-        );
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(call_id.clone(), PendingRoute { tx: otx });
         let _ = self.tx.send(Message::Text(frame.to_string().into()));
 
         Box::pin(async move {

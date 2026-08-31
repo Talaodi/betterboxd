@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import ConfirmCard from "../components/ConfirmCard";
 
 type Frame = {
@@ -23,7 +22,6 @@ type Msg =
 
 /** 控制台（默认页；AI 对话页的 global 实例）。 */
 export default function Console() {
-  const navigate = useNavigate();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
@@ -207,8 +205,6 @@ export default function Console() {
           )}
         </div>
       </div>
-      {/* 占位：跳转演示 */}
-      <button className="hidden" onClick={() => navigate("/diary")} />
     </div>
   );
 }

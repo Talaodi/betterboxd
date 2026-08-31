@@ -986,15 +986,37 @@ async fn set_movie_state(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let args = confirmed_args(ctx, "set_movie_state", args.clone()).await?;
     let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
     let rating_req = validate_rating(get_i64(&args, "my_rating"))?;
+    let clear_rating = get_bool(&args, "clear_my_rating").unwrap_or(false);
     let liked = get_bool(&args, "liked");
     let watchlist = get_bool(&args, "in_watchlist");
-    if rating_req.is_none() && liked.is_none() && watchlist.is_none() {
-        return Err("未提供任何状态字段（my_rating/liked/in_watchlist）".into());
+    if rating_req.is_none() && !clear_rating && liked.is_none() && watchlist.is_none() {
+        return Err("未提供任何状态字段（my_rating/liked/in_watchlist/clear_my_rating）".into());
     }
     ctx.db
         .call(move |c| {
             let tx = c.unchecked_transaction()?;
             let at = crate::now();
+            if clear_rating {
+                // 清除 = 终态断言 NULL（重算命中即停），审计保留旧值
+                let old: Option<i64> = tx
+                    .query_row(
+                        "SELECT my_rating FROM movies WHERE tmdb_id=?1",
+                        params![movie_id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                let changes =
+                    serde_json::json!({"my_rating": [old, serde_json::Value::Null]}).to_string();
+                tx.execute(
+                    "INSERT INTO actions (id, movie_id, target, target_id, at, source, changes_json)
+                     VALUES (?1,?2,'movie',?2,?3,'standalone',?4)",
+                    params![uuid::Uuid::now_v7().to_string(), movie_id, at, changes],
+                )?;
+                tx.execute(
+                    "UPDATE movies SET my_rating=NULL WHERE tmdb_id=?1",
+                    params![movie_id],
+                )?;
+            }
             if let Some(r) = rating_req {
                 assert_and_recompute(&tx, movie_id, at, "standalone", None, "my_rating", r)?;
             }

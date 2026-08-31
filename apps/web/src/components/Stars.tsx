@@ -45,7 +45,7 @@ export function StarsEditor({
           <span
             key={t}
             className="absolute top-0 h-full"
-            style={{ left: 0, width: `${((i + 1) / 10) * 100}%` }}
+            style={{ left: `${(i / 10) * 100}%`, width: "10%" }}
             onClick={() => onChange(value === t ? null : t)}
             onMouseEnter={() => setHover(t)}
           />

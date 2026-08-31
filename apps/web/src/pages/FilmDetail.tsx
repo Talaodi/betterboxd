@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { getJson, parseJsonArray, posterUrl, sendJson, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import { StarsEditor } from "../components/Stars";
@@ -18,7 +18,6 @@ const KIND_BADGE: Record<string, { label: string; color: string }> = {
 
 export default function FilmDetail() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState("all");
   const [showDiary, setShowDiary] = useState(false);
@@ -32,8 +31,12 @@ export default function FilmDetail() {
   useEffect(load, [id]);
 
   const setState = async (patch: Record<string, unknown>) => {
-    await sendJson(`/api/movie/${id}/state`, "POST", patch);
-    load();
+    try {
+      await sendJson(`/api/movie/${id}/state`, "POST", patch);
+      load();
+    } catch (e) {
+      alert(`状态修改失败: ${(e as Error).message}`);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -66,9 +69,11 @@ export default function FilmDetail() {
               {m.year} · {directors} · {m.runtime ?? "?"}min
               {genres.length > 0 && ` · ${genres.join(" / ")}`}
             </p>
-            <p className="mt-1 text-sm text-[#5a6b7c]">
-              TMDB {m.lb_rating ? `· Letterboxd ${m.lb_rating} (${m.lb_votes})` : ""}
-            </p>
+            {m.lb_rating !== null && m.lb_rating !== undefined && (
+              <p className="mt-1 text-sm text-[#5a6b7c]">
+                Letterboxd 参考 {m.lb_rating}（{m.lb_votes} 人）
+              </p>
+            )}
             {m.tagline && <p className="mt-2 text-sm italic text-[#40bcf4]">“{m.tagline}”</p>}
           </div>
         </div>
@@ -160,7 +165,6 @@ export default function FilmDetail() {
       {showReview && (
         <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />
       )}
-      <button className="hidden" onClick={() => navigate("/")}> </button>
     </div>
   );
 }
@@ -175,7 +179,8 @@ function DiaryModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const nowD = new Date();
+  const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
   const [date, setDate] = useState(today);
   const [rating, setRating] = useState<number | null>(null);
   const [theater, setTheater] = useState(false);
