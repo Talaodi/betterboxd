@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import ConfirmCard from "./ConfirmCard";
 
 type Frame = {
-  type: "hello" | "token" | "tool" | "tool_done" | "done" | "error";
+  type: "hello" | "token" | "tool" | "tool_done" | "confirm" | "done" | "error";
   data?: string;
   name?: string;
   ok?: boolean;
+  call_id?: string;
+  args?: Record<string, unknown>;
   message?: string;
   session_id?: string;
   interrupted?: boolean;
@@ -27,6 +30,9 @@ export default function App() {
   const [input, setInput] = useState("");
   const [connected, setConnected] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<{
+    call_id: string; name: string; args: Record<string, unknown>; movieTitle?: string;
+  } | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const accRef = useRef("");
 
@@ -54,6 +60,25 @@ export default function App() {
         case "tool":
           setMessages((ms) => [...ms, { role: "tool", name: f.name ?? "?" }]);
           break;
+        case "confirm": {
+          const args = (f.args ?? {}) as Record<string, unknown>;
+          setPendingConfirm({
+            call_id: f.call_id ?? "",
+            name: f.name ?? "",
+            args,
+          });
+          const mid = args["movie_id"];
+          if (typeof mid === "number") {
+            fetch(`/api/movie/${mid}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((d) => {
+                const t = d?.movie?.title_main;
+                if (t) setPendingConfirm((p) => (p ? { ...p, movieTitle: t } : p));
+              })
+              .catch(() => {});
+          }
+          break;
+        }
         case "tool_done":
           setMessages((ms) => {
             for (let i = ms.length - 1; i >= 0; i--) {
@@ -106,7 +131,24 @@ export default function App() {
 
   const interrupt = useCallback(() => {
     wsRef.current?.send(JSON.stringify({ type: "interrupt" }));
+    setPendingConfirm(null);
   }, []);
+
+  const resolveConfirm = useCallback(
+    (decision: "confirm" | "reject", args?: Record<string, unknown>) => {
+      if (!pendingConfirm) return;
+      wsRef.current?.send(
+        JSON.stringify({
+          type: "confirm",
+          call_id: pendingConfirm.call_id,
+          decision,
+          args,
+        }),
+      );
+      setPendingConfirm(null);
+    },
+    [pendingConfirm],
+  );
 
   return (
     <div className="flex h-full flex-col items-center px-6 pt-6">
@@ -147,6 +189,13 @@ export default function App() {
             ),
           )}
         </div>
+        {pendingConfirm && (
+          <ConfirmCard
+            pending={pendingConfirm}
+            onConfirm={(args) => resolveConfirm("confirm", args)}
+            onReject={() => resolveConfirm("reject")}
+          />
+        )}
         <div className="mb-6 flex gap-2">
           <input
             className="flex-1 rounded-lg border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm outline-none focus:border-[#40bcf4]"
