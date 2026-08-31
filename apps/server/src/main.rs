@@ -810,6 +810,58 @@ async fn handle_chat(app: App, socket: WebSocket) {
     drop(tx);
 }
 
+
+// ============ 配置端点（R3）============
+
+/// 配置读取（api_key 打码）。
+async fn config_get(State(app): State<App>) -> Response {
+    let cfg = app.config.lock().unwrap().clone();
+    let mut v = serde_json::to_value(&cfg).unwrap_or(json!({}));
+    if let Some(profiles) = v.get_mut("profiles").and_then(|p| p.as_array_mut()) {
+        for p in profiles {
+            if let Some(key) = p.get_mut("api_key").and_then(|k| k.as_str()) {
+                let masked = if key.len() > 8 {
+                    format!("{}...{}", &key[..4], &key[key.len()-4..])
+                } else { "****".into() };
+                p["api_key"] = json!(masked);
+            }
+        }
+    }
+    Json(v).into_response()
+}
+
+/// 配置写入。
+async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json::Value>) -> Response {
+    let mut cfg = app.config.lock().unwrap().clone();
+    if let Some(new_profiles) = new_cfg.get_mut("profiles").and_then(|p| p.as_array_mut()) {
+        for (i, np) in new_profiles.iter_mut().enumerate() {
+            if let Some(key_str) = np.get("api_key").and_then(|k| k.as_str()) {
+                if key_str.contains("...") {
+                    if let Some(old) = cfg.profiles.get(i) {
+                        np["api_key"] = serde_json::json!(old.api_key.clone());
+                    }
+                }
+            }
+        }
+    }
+    let parsed: Result<Config, _> = serde_json::from_value(new_cfg);
+    match parsed {
+        Ok(c) => {
+            let path = data_dir_path().join(".betterboxd/config.toml");
+            if c.save(&path).is_err() {
+                return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "配置保存失败").into_response();
+            }
+            *app.config.lock().unwrap() = c;
+            axum::Json(json!({"ok": true})).into_response()
+        }
+        Err(e) => (axum::http::StatusCode::BAD_REQUEST, format!("配置解析失败: {e}")).into_response(),
+    }
+}
+
+fn data_dir_path() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var("BB_DATA").unwrap_or_else(|_| "data".into()))
+}
+
 #[tokio::main]
 async fn main() {
     let data_dir =
@@ -872,7 +924,8 @@ async fn main() {
         .route("/api/stats/run", post(stats_run))
         .route("/api/saved-queries", get(saved_queries_list).post(saved_query_create))
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
-        .route("/api/chats", get(chats_list))
+                .route("/api/chats", get(chats_list))
+        .route("/api/config", get(config_get).post(config_save))
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))
         .with_state(app);
 

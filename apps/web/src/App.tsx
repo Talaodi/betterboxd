@@ -5,6 +5,7 @@ import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
 import Chats from "./pages/Chats";
 import Stats from "./pages/Stats";
+import Settings from "./pages/Settings";
 import Placeholder from "./pages/Placeholder";
 
 const NAV = [
@@ -23,8 +24,9 @@ export default function App() {
       <div className="flex h-full">
         {/* 侧边栏 */}
         <nav className="flex w-[220px] flex-col border-r border-[#1e2630] bg-[#1b222b]">
-          <div className="px-4 py-4 text-sm font-bold tracking-wide text-[#00e054]">
-            Betterboxd
+          <div className="px-4 py-4">
+            <div className="text-sm font-bold tracking-wide text-[#00e054]">Betterboxd</div>
+            <NavLink to="/settings" className="text-xs text-[#5a6b7c] hover:text-[#40bcf4]">⚙ 设置</NavLink>
           </div>
           {NAV.map((n) => (
             <NavLink
@@ -71,7 +73,7 @@ export default function App() {
             />
             <Route
               path="/settings"
-              element={<Placeholder title="设置" note="M3：设置页" />}
+              element={<Settings />}
             />
           </Routes>
         </main>
