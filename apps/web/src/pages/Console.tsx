@@ -38,11 +38,15 @@ export default function Console() {
           )}
           {messages.map((m, i) =>
             m.role === "tool" ? (
-              <div key={i} className="text-xs text-[#5a6b7c]">
+              <div key={i} className="flex items-center gap-2 pl-10 text-xs text-[#5a6b7c]">
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[#00e054] text-[10px] font-bold text-[#0c1a10]">B</span>
                 🔧 {m.name} {m.ok === false ? "✗" : m.ok ? "✓" : "…"}
               </div>
             ) : (
-              <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
+              <div key={i} className={"flex " + (m.role === "user" ? "justify-end" : "items-start gap-2")}>
+                {m.role === "assistant" && (
+                  <span className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00e054] text-[11px] font-bold text-[#0c1a10]">B</span>
+                )}
                 <span
                   className={
                     "inline-block max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm " +

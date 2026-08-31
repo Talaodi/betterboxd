@@ -58,29 +58,32 @@ export default function FilmDetail() {
           <Poster tmdbId={m.tmdb_id} title={m.title_main} size="detail" className="shadow-xl" />
         </div>
 
-        {/* 中：标题与信息 */}
+        {/* 中：标题与信息（LB 式排版） */}
         <div className="min-w-0 flex-1">
           <h1 className="text-4xl font-bold leading-tight">{m.title_main}</h1>
-          <p className="mt-2 text-sm text-[#8899aa]">
-            {m.year}
-            {m.title_original && m.title_original !== m.title_main && (
-              <span className="ml-2 italic">‘{m.title_original}’</span>
-            )}
-            {directors && <span className="ml-2">Directed by {directors}</span>}
+          {m.title_sub && m.title_sub !== m.title_main && (
+            <p className="mt-1 text-lg italic text-[#5a6b7c]">({m.title_sub})</p>
+          )}
+          <p className="mt-3 text-sm text-[#8899aa]">
+            {[
+              m.year,
+              directors || null,
+              m.runtime ? `${m.runtime} 分钟` : null,
+              genres.length > 0 ? genres.join(" / ") : null,
+            ].filter(Boolean).join(" · ")}
           </p>
           {m.tagline && (
-            <p className="mt-4 text-xs uppercase tracking-widest text-[#8899aa]">{m.tagline}</p>
+            <p className="mt-3 text-xs uppercase tracking-widest text-[#8899aa]">{m.tagline}</p>
           )}
-          <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-[#c8d2dc]">
+          <p className="mt-4 text-base leading-relaxed font-light text-[#c8d2dc]">
             {m.overview}
           </p>
-          <p className="mt-4 text-xs text-[#5a6b7c]">
-            {m.runtime ? `${m.runtime} mins` : ""}
-            {genres.length > 0 && ` · ${genres.join(" / ")}`}
+          <p className="mt-3 text-xs text-[#5a6b7c]">
+            简介来自 TMDB
           </p>
           {m.tmdb_rating !== null && m.tmdb_rating !== undefined && (
-            <p className="mt-1 text-xs text-[#5a6b7c]">
-              TMDB 参考 {m.tmdb_rating}（{m.tmdb_votes} 人评分）· 简介来自 TMDB
+            <p className="mt-2 text-xs text-[#5a6b7c]" title={`${m.tmdb_votes} 人评分`}>
+              TMDB {m.tmdb_rating.toFixed(1)}
             </p>
           )}
         </div>

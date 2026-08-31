@@ -84,16 +84,11 @@ export default function Diary() {
                 />
                 {/* 片名 + 标记 */}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-base font-medium">
+                  <div className="truncate text-base font-semibold">
                     {r.title_main}
-                    {r.rewatch_index > 1 && (
-                      <span className="ml-2 rounded bg-[#2c3440] px-1 text-xs text-[#8899aa]">
-                        第{r.rewatch_index}次
-                      </span>
-                    )}
-                  </div>
-                  <div className="truncate text-xs text-[#5a6b7c]">
-                    {parseJsonArray(r.tags).map(String).join(" · ")}
+                    <span className="ml-2 text-sm font-normal italic text-[#5a6b7c]">
+                      ({r.title_sub})
+                    </span>
                   </div>
                 </div>
                 {/* 年份 */}
@@ -134,9 +129,19 @@ export default function Diary() {
               </div>
               {/* 展开区：随记 + 维度 + 双轨提示 */}
               {isExpanded && (
-                <div className="space-y-2 bg-[#161c23] px-6 py-3 text-sm">
+                <div className="space-y-3 bg-[#161c23] px-10 py-4 text-sm">
+                  {parseJsonArray(r.dimensions_flat).length > 0 && (
+                    <p className="text-xs text-[#8899aa]">
+                      {parseJsonArray(r.dimensions_flat)
+                        .map((d) => {
+                          const o = d as { dimension: string; name: string };
+                          return `${o.dimension}:${o.name}`;
+                        })
+                        .join(" · ")}
+                    </p>
+                  )}
                   {r.private_note ? (
-                    <p className="whitespace-pre-wrap text-[#dfe7ef]">{r.private_note}</p>
+                    <p className="whitespace-pre-wrap leading-relaxed text-[#dfe7ef]">{r.private_note}</p>
                   ) : (
                     <p className="text-[#5a6b7c]">（无随记）</p>
                   )}
@@ -148,11 +153,6 @@ export default function Diary() {
                           return `${o.dimension}:${o.name}`;
                         })
                         .join(" · ")}
-                    </p>
-                  )}
-                  {r.rating !== null && r.my_rating !== null && r.rating !== r.my_rating && (
-                    <p className="text-xs text-[#5a6b7c]">
-                      当次 {r.rating} · 影片最终评分 {r.my_rating}（双轨评分）
                     </p>
                   )}
                   <button className="text-xs text-[#40bcf4]" onClick={() => navigate(`/film/${r.movie_id}`)}>

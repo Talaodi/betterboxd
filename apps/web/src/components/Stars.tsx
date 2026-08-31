@@ -62,9 +62,19 @@ export function StarsEditor({
           />
         ))}
       </div>
-      <span className="ml-1 text-xs text-[#5a6b7c]">
-        {value === null ? "未评分" : value}
-      </span>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step={10}
+        className="ml-2 w-16 rounded border border-[#33414f] bg-[#14181c] px-2 py-0.5 text-sm text-center"
+        value={value === null ? "" : value}
+        placeholder="未评分"
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          onChange(e.target.value === "" || isNaN(n) ? null : Math.min(100, Math.max(0, n)));
+        }}
+      />
     </div>
   );
 }
