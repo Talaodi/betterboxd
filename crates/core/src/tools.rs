@@ -637,6 +637,7 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
         "add" => {
             let args = confirmed_args(ctx, "manage_diary", args.clone()).await?;
             let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id（请先搜索确认影片）")?;
+            let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
             let watched_date = get_str(&args, "watched_date")
                 .ok_or("缺少 watched_date")?
                 .to_string();
@@ -797,6 +798,7 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
         "add" => {
             let args = confirmed_args(ctx, "manage_reviews", args.clone()).await?;
             let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
+            let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
             let title = get_str(&args, "title").map(String::from);
             let body_md = get_str(&args, "body_md").ok_or("缺少 body_md")?.to_string();
             let rating = validate_rating(get_i64(&args, "rating"))?;
@@ -926,6 +928,7 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
 async fn set_movie_state(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let args = confirmed_args(ctx, "set_movie_state", args.clone()).await?;
     let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
+    let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
     let rating_req = validate_rating(get_i64(&args, "my_rating"))?;
     let clear_rating = get_bool(&args, "clear_my_rating").unwrap_or(false);
     let liked = get_bool(&args, "liked");
