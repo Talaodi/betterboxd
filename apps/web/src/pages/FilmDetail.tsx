@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { getJson, parseJsonArray, sendJson, type LogRow, type MovieRow } from "../api";
+import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import ChatPanel from "../components/ChatPanel";
+import { DiaryCard, ReviewCard, ChatCard } from "../components/Cards";
 import { StarsEditor } from "../components/Stars";
 
 type Detail = {
@@ -168,18 +169,34 @@ export default function FilmDetail() {
         </div>
         <div className="space-y-2">
           {filtered.length === 0 && <p className="text-sm text-[#5a6b7c]">暂无记录</p>}
-          {filtered.map((l: LogRow) => (
-            <div key={l.kind + l.id} className="rounded border border-[#2c3440] bg-[#1b222b] px-3 py-2 text-sm">
-              <span
-                className="mr-2 rounded px-1 text-xs"
-                style={{ color: KIND_BADGE[l.kind]?.color }}
-              >
-                {KIND_BADGE[l.kind]?.label}
-              </span>
-              <span className="text-[#8899aa]">{l.at}</span>
-              <span className="ml-2">{l.brief}</span>
-            </div>
-          ))}
+          {filtered.map((l: LogRow) => {
+            if (l.kind === "watch" && l.diary) {
+              const d = l.diary as unknown as DiaryRow;
+              return <DiaryCard key={l.kind + l.id} entry={{ ...d, entry_id: l.id }} />;
+            }
+            if (l.kind === "review" && l.review) {
+              return (
+                <ReviewCard
+                  key={l.kind + l.id}
+                  review={l.review as never}
+                />
+              );
+            }
+            if (l.kind === "chat") {
+              return (
+                <ChatCard key={l.kind + l.id} sessionId={l.id} title={l.brief} date={l.at} />
+              );
+            }
+            return (
+              <div key={l.kind + l.id} className="rounded-lg border border-[#2c3440] bg-[#1b222b] px-3 py-2 text-sm">
+                <span className="mr-2 rounded px-1 text-xs" style={{ color: KIND_BADGE[l.kind]?.color }}>
+                  {KIND_BADGE[l.kind]?.label}
+                </span>
+                <span className="text-[#8899aa]">{l.at}</span>
+                <span className="ml-2">{l.brief}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
       {chatOpen && (

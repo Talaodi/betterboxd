@@ -39,18 +39,33 @@ type Store = {
   acc: string;
   pendingConfirm: Pending | null;
   sessionId: string;
+  /** fresh 重连标记：newChat 后首次重连仍走 fresh=1，hello 后复位 */
+  freshPending: boolean;
   listeners: Set<() => void>;
 };
 
 const stores = new Map<string, Store>();
 const refCount = new Map<string, number>();
 
-function storeKey(movieId?: number) {
-  return movieId ? `movie:${movieId}` : "global";
+export type ChatScope = {
+  /** movie 作用域：连接 /ws/chat?movie_id=N（恢复该影片最近会话） */
+  movieId?: number;
+  /** 精确恢复指定会话（Chats 页打开历史会话） */
+  sessionId?: string;
+  /** 新建会话的临时存储键（Chats 页「新建控制台会话」） */
+  freshKey?: string;
+};
+
+function storeKey(scope?: ChatScope) {
+  if (!scope) return "global";
+  if (scope.freshKey) return `fresh:${scope.freshKey}`;
+  if (scope.sessionId) return `session:${scope.sessionId}`;
+  if (scope.movieId) return `movie:${scope.movieId}`;
+  return "global";
 }
 
 function getStore(key: string): Store {
-  let s = stores.get(key);
+  let s: Store | undefined = stores.get(key);
   if (!s) {
     s = {
       ws: null,
@@ -60,6 +75,7 @@ function getStore(key: string): Store {
       acc: "",
       pendingConfirm: null,
       sessionId: "",
+      freshPending: false,
       listeners: new Set(),
     };
     stores.set(key, s);
@@ -73,6 +89,7 @@ function handleFrame(s: Store, key: string, f: Frame) {
   switch (f.type) {
     case "hello": {
       s.sessionId = f.session_id ?? "";
+      s.freshPending = false;
       // 历史恢复：内存为空时拉取该会话消息（刷新/重开抽屉后回填）
       if (s.sessionId && s.messages.length === 0) {
         fetch(`/api/chats/${s.sessionId}`)
@@ -164,11 +181,17 @@ function flushAssistant(s: Store) {
   }
 }
 
-function connect(key: string, movieId?: number, fresh = false) {
+function connect(key: string, scope?: ChatScope) {
   const s = getStore(key);
   if (s.ws && s.ws.readyState <= WebSocket.OPEN) return;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const qs = `${movieId ? `movie_id=${movieId}` : ""}${fresh ? `${movieId ? "&" : ""}fresh=1` : ""}`;
+  const qs = scope?.freshKey
+    ? "fresh=1"
+    : scope?.sessionId
+      ? `session_id=${scope.sessionId}`
+      : scope?.movieId
+        ? `movie_id=${scope.movieId}`
+        : "";
   const ws = new WebSocket(`${proto}://${location.host}/ws/chat${qs ? `?${qs}` : ""}`);
   s.ws = ws;
   ws.onopen = () => {
@@ -182,9 +205,22 @@ function connect(key: string, movieId?: number, fresh = false) {
     s.connected = false;
     s.streaming = false;
     notify(s);
-    // 仍有人订阅时断线自动重连；movie 作用域无人订阅则不再连
-    if ((refCount.get(key) ?? 0) > 0) setTimeout(() => connect(key, movieId), 1500);
+    // 仍有人订阅时断线自动重连（freshPending 时仍走 fresh=1）
+    if ((refCount.get(key) ?? 0) > 0) {
+      setTimeout(() => connect(key, scopeForReconnect(key, s)), 1500);
+    }
   };
+}
+
+/** 断线重连用的作用域：从 key 反推；freshPending 期间维持 fresh。 */
+function scopeForReconnect(key: string, s: Store): ChatScope | undefined {
+  if (s.freshPending) return { freshKey: key };
+  if (key === "global") return undefined;
+  const [kind, ...rest] = key.split(":");
+  const id = rest.join(":");
+  if (kind === "movie") return { movieId: Number(id) };
+  if (kind === "session") return { sessionId: id };
+  return undefined;
 }
 
 /** 无人订阅且不在流式中时关闭 WS（movie 作用域防连接泄漏）。 */
@@ -198,15 +234,16 @@ function maybeClose(key: string) {
 }
 
 // ===== 对外 API =====
-export function useChat(scope?: { movieId?: number }) {
-  const key = storeKey(scope?.movieId);
+export function useChat(scope?: ChatScope) {
+  const key = storeKey(scope);
+  const scopeRef = scope;
   const [, force] = useState(0);
   useEffect(() => {
     refCount.set(key, (refCount.get(key) ?? 0) + 1);
     const l = () => force((n) => n + 1);
     const s = getStore(key);
     s.listeners.add(l);
-    connect(key, scope?.movieId);
+    connect(key, scopeRef);
     return () => {
       refCount.set(key, Math.max(0, (refCount.get(key) ?? 1) - 1));
       s.listeners.delete(l);
@@ -246,8 +283,9 @@ export function useChat(scope?: { movieId?: number }) {
     s.pendingConfirm = null;
     s.sessionId = "";
     notify(s);
-    connect(key, scope?.movieId, true);
-  }, [key, scope?.movieId]);
+    s.freshPending = true;
+    connect(key, { freshKey: "global-new" });
+  }, [key]);
 
   const resolveConfirm = useCallback(
     (decision: "confirm" | "reject", args?: Record<string, unknown>) => {

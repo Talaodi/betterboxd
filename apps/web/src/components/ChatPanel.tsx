@@ -18,17 +18,37 @@ export function Markdown({ children }: { children: string }) {
 export default function ChatPanel({
   movieId,
   movieTitle,
+  sessionId,
+  freshKey,
+  onSessionReady,
+  header,
   placeholder = "和影迷助手聊聊…",
   hint,
 }: {
   movieId?: number;
   movieTitle?: string;
+  /** 精确恢复指定会话（Chats 页打开历史会话） */
+  sessionId?: string;
+  /** 新建会话（Chats 页「新建控制台会话」）：连接 ?fresh=1 */
+  freshKey?: string;
+  /** fresh 会话建立后回调真实 session id（用于列表刷新/切换 key） */
+  onSessionReady?: (sessionId: string) => void;
+  /** 自定义标题行文案（默认 控制台/💬片名） */
+  header?: string;
   placeholder?: string;
   hint?: string;
 }) {
+  const chat = useChat(
+    freshKey ? { freshKey } : sessionId ? { sessionId } : movieId ? { movieId } : undefined,
+  );
   const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm, newChat } =
-    useChat(movieId ? { movieId } : undefined);
+    chat;
   const [input, setInput] = useState("");
+
+  // fresh 会话建立 → 上报真实 session id
+  useEffect(() => {
+    if (freshKey && chat.sessionId) onSessionReady?.(chat.sessionId);
+  }, [freshKey, chat.sessionId, onSessionReady]);
 
   const send = useCallback(() => {
     const text = input.trim();
@@ -47,10 +67,10 @@ export default function ChatPanel({
       {/* 标题行 */}
       <div className="flex items-baseline justify-between px-1 pb-2">
         <span className="text-sm font-medium tracking-wide text-[#8899aa]">
-          {movieTitle ? `💬 ${movieTitle}` : "控制台"}
+          {header ?? (movieTitle ? `💬 ${movieTitle}` : "控制台")}
         </span>
         <span className="flex items-baseline gap-3">
-          {!movieId && (
+          {!movieId && !sessionId && !freshKey && (
             <button
               className="text-xs text-[#5a6b7c] hover:text-[#40bcf4] disabled:opacity-40"
               onClick={newChat}

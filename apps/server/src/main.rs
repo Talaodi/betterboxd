@@ -219,8 +219,54 @@ async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Respon
             "SELECT list_id, name, rank, ranked FROM v_lists WHERE movie_id={id}"
         ))
         .await;
+    // Log 富化：三类各查一次全量（量小），按 id 挂 payload（前端渲染互动卡片）
+    let diary = app
+        .db
+        .select_json(&format!(
+            "SELECT entry_id, watched_date, rating, liked, in_theater, ticket_price_cents,
+                    private_note, rewatch_index, tags, dimensions_flat
+             FROM v_diary_full WHERE movie_id={id}"
+        ))
+        .await
+        .unwrap_or_default();
+    let reviews = app
+        .db
+        .select_json(&format!(
+            "SELECT review_id, title, body_md, rating, liked, created_at
+             FROM v_reviews_full WHERE movie_id={id}"
+        ))
+        .await
+        .unwrap_or_default();
+    let chats = app
+        .db
+        .select_json(&format!(
+            "SELECT id, title, last_message_at FROM chat_sessions WHERE movie_id={id}"
+        ))
+        .await
+        .unwrap_or_default();
     match (movie, logs, lists) {
-        (Ok(mut m), Ok(logs), Ok(lists)) => {
+        (Ok(mut m), Ok(mut logs), Ok(lists)) => {
+            for log in logs.iter_mut() {
+                let lid = log["id"].as_str().unwrap_or("").to_string();
+                match log["kind"].as_str().unwrap_or("") {
+                    "watch" => {
+                        if let Some(d) = diary.iter().find(|d| d["entry_id"] == log["id"]) {
+                            log["diary"] = d.clone();
+                        }
+                    }
+                    "review" => {
+                        if let Some(r) = reviews.iter().find(|r| r["review_id"] == log["id"]) {
+                            log["review"] = r.clone();
+                        }
+                    }
+                    "chat" => {
+                        if let Some(c) = chats.iter().find(|c| c["id"].as_str() == Some(lid.as_str())) {
+                            log["chat"] = c.clone();
+                        }
+                    }
+                    _ => {}
+                }
+            }
             let movie_json = m
                 .pop()
                 .map(|mv| json!({"movie": mv, "logs": logs, "lists": lists}));
@@ -734,6 +780,8 @@ async fn tools_execute(State(app): State<App>, Json(args): Json<serde_json::Valu
 #[derive(Deserialize)]
 struct WsChatQuery {
     movie_id: Option<i64>,
+    /// 按 session id 精确恢复（Chats 页打开指定会话）
+    session_id: Option<String>,
     /// 跳过恢复，强制开新会话（控制台「新对话」按钮）
     fresh: Option<String>,
 }
@@ -744,11 +792,20 @@ async fn ws_chat(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let movie_id = q.movie_id;
+    let session_id = q
+        .session_id
+        .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
     let fresh = matches!(q.fresh.as_deref(), Some("1") | Some("true"));
-    ws.on_upgrade(move |socket| handle_chat(app, socket, movie_id, fresh))
+    ws.on_upgrade(move |socket| handle_chat(app, socket, movie_id, session_id, fresh))
 }
 
-async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>, fresh: bool) {
+async fn handle_chat(
+    app: App,
+    socket: WebSocket,
+    ws_movie_id: Option<i64>,
+    ws_session_id: Option<String>,
+    fresh: bool,
+) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
@@ -761,17 +818,21 @@ async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>, fres
         }
     });
 
-    // 会话恢复：同 scope 最近会话续聊（刷新/重开不丢历史）；fresh 或无历史才新建
-    let scope = if ws_movie_id.is_some() { "movie" } else { "global" };
-    let resumed = if fresh {
+    // 会话恢复优先级：session_id 精确恢复 > 同 scope 最近会话 > 新建
+    let mut current = if fresh {
         None
+    } else if let Some(sid) = &ws_session_id {
+        app.sessions.load(sid)
     } else {
+        let scope = if ws_movie_id.is_some() { "movie" } else { "global" };
         app.sessions.find_latest(scope, ws_movie_id).await
     };
-    let mut current = resumed.unwrap_or_else(|| match ws_movie_id {
+    let mut current = current.unwrap_or_else(|| match ws_movie_id {
         Some(mid) => app.sessions.new_session("movie", Some(mid), None, None),
         None => app.sessions.new_session("global", None, None, None),
     });
+    // 恢复的会话自带 movie 归属——上下文注入跟随会话而非查询参数
+    let session_movie_id = current.movie_id;
     let hello = serde_json::json!({"type": "hello", "session_id": current.id});
     let _ = tx.send(Message::Text(hello.to_string().into()));
 
@@ -799,7 +860,7 @@ async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>, fres
         *cancel.lock().unwrap() = Some(token.clone());
 
         // 构建 movie 上下文注入（scope=movie 时）
-    let context_injection = if let Some(mid) = ws_movie_id {
+    let context_injection = if let Some(mid) = session_movie_id {
         let mut ctx_parts = Vec::new();
         if let Ok(rows) = app.db.select_json(&format!(
             "SELECT title_main, title_sub, year, directors, genres, runtime,

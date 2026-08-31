@@ -60,7 +60,16 @@ export type DiaryRow = {
   dimensions_flat: string; // JSON 数组 [{dimension,name}]
 };
 
-export type LogRow = { kind: string; id: string; at: string; brief: string };
+export type LogRow = {
+  kind: string;
+  id: string;
+  at: string;
+  brief: string;
+  /** /api/movie/{id} 富化负载（Log 卡片渲染用） */
+  diary?: Record<string, unknown>;
+  review?: Record<string, unknown>;
+  chat?: Record<string, unknown>;
+};
 
 export const posterUrl = (tmdbId: number) => `/api/poster/${tmdbId}`;
 
