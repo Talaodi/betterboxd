@@ -10,7 +10,7 @@ export default function Poster({
 }: {
   tmdbId: number;
   title: string;
-  size?: "thumb" | "grid" | "large";
+  size?: "thumb" | "grid" | "detail" | "large";
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);

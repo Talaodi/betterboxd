@@ -60,7 +60,7 @@ export default function FilmDetail() {
       />
       <div className="mx-auto max-w-[1100px] px-6">
         <div className="-mt-32 flex items-end gap-6 pb-2">
-          <Poster tmdbId={m.tmdb_id} title={m.title_main} size="grid" className="w-[210px] shrink-0 shadow-xl" />
+          <Poster tmdbId={m.tmdb_id} title={m.title_main} size="detail" className="shrink-0 shadow-xl" />
           <div className="flex-1 pb-3">
             <h1 className="text-2xl font-bold">
               {m.title_main}
@@ -97,7 +97,13 @@ export default function FilmDetail() {
           >
             ♥
           </button>
-          <StarsEditor value={m.my_rating} onChange={(v) => setState({ my_rating: v })} />
+          <StarsEditor
+            value={m.my_rating}
+            onChange={(v) => {
+              if (v === null) return; // 同分清除手势 → 忽略，不报错
+              setState({ my_rating: v });
+            }}
+          />
           <span className="ml-auto text-xs text-[#5a6b7c]">
             {m.watched ? "已看" : "未看"}
           </span>
