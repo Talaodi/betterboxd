@@ -701,7 +701,7 @@ pub fn recompute_movie_state(conn: &Connection, movie_id: i64) -> rusqlite::Resu
              WHERE movie_id = ?1 AND target = 'movie'
                AND source IN ('edit','agent','standalone')
                AND json_extract(changes_json, ?2) IS NOT NULL
-             ORDER BY at DESC",
+             ORDER BY at DESC, rowid DESC",
         )?;
         let rows = st.query_map(rusqlite::params![movie_id, format!("$.{field}[1]")], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
@@ -837,6 +837,8 @@ mod state_tests {
             .unwrap();
         assert_eq!((mr, watched), (Some(85), 1));
 
+        // 独立改分时间必须严格晚于条目断言（同秒以 rowid 决胜，此处跨秒更稳）
+        std::thread::sleep(std::time::Duration::from_millis(1100));
         // 8 月建 Review 断言 95（edit, ref=review）→ 最终 95
         c.execute(
             "INSERT INTO reviews (id, movie_id, body_md, rating, created_at, updated_at)

@@ -6,6 +6,7 @@
 use betterboxd_core::config::Config;
 use betterboxd_core::db::apply_migrations;
 use betterboxd_core::tmdb::TmdbClient;
+use betterboxd_core::tools::{ensure_pool, ensure_tag};
 use chrono::TimeZone;
 use rusqlite::{Connection, params};
 use serde_json::json;
@@ -383,42 +384,6 @@ const REVIEWS: &[(usize, &str, &str, Option<i64>, bool)] = &[
         true,
     ),
 ];
-
-fn ensure_pool(conn: &Connection, dim: &str, name: &str) -> String {
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT id FROM dimension_values WHERE dimension=?1 AND name=?2",
-            params![dim, name],
-            |r| r.get(0),
-        )
-        .ok();
-    existing.unwrap_or_else(|| {
-        let id = uuid::Uuid::now_v7().to_string();
-        conn.execute(
-            "INSERT INTO dimension_values (id, dimension, name) VALUES (?1,?2,?3)",
-            params![id, dim, name],
-        )
-        .unwrap();
-        id
-    })
-}
-
-fn ensure_tag(conn: &Connection, name: &str) -> String {
-    let existing: Option<String> = conn
-        .query_row("SELECT id FROM tags WHERE name=?1", params![name], |r| {
-            r.get(0)
-        })
-        .ok();
-    existing.unwrap_or_else(|| {
-        let id = uuid::Uuid::now_v7().to_string();
-        conn.execute(
-            "INSERT INTO tags (id, name) VALUES (?1,?2)",
-            params![id, name],
-        )
-        .unwrap();
-        id
-    })
-}
 
 fn insert_action(
     conn: &Connection,
