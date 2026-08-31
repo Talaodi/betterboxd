@@ -612,11 +612,21 @@ async fn tools_execute(State(app): State<App>, Json(args): Json<serde_json::Valu
     }
 }
 
-async fn ws_chat(State(app): State<App>, ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_chat(app, socket))
+#[derive(Deserialize)]
+struct WsChatQuery {
+    movie_id: Option<i64>,
 }
 
-async fn handle_chat(app: App, socket: WebSocket) {
+async fn ws_chat(
+    State(app): State<App>,
+    Query(q): Query<WsChatQuery>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    let movie_id = q.movie_id;
+    ws.on_upgrade(move |socket| handle_chat(app, socket, movie_id))
+}
+
+async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
@@ -629,7 +639,10 @@ async fn handle_chat(app: App, socket: WebSocket) {
         }
     });
 
-    let mut current = app.sessions.new_session("global", None, None, None);
+    let mut current = match ws_movie_id {
+        Some(mid) => app.sessions.new_session("movie", Some(mid), None, None),
+        None => app.sessions.new_session("global", None, None, None),
+    };
     let hello = serde_json::json!({"type": "hello", "session_id": current.id});
     let _ = tx.send(Message::Text(hello.to_string().into()));
 

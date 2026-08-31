@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "../chatStore";
 import ConfirmCard from "../components/ConfirmCard";
+import ReactMarkdown from "react-markdown";
 
 /** 控制台（默认页；AI 对话页的 global 实例）。
  *  WS 与会话状态由 chatStore 单例持有——切页不断连接、不丢确认卡。 */
@@ -53,7 +54,11 @@ export default function Console() {
                     (m.role === "user" ? "bg-[#2c3440]" : "bg-[#232b35]")
                   }
                 >
-                  {m.text}
+                  {m.role === "assistant" ? (
+                    <div className="prose prose-invert prose-sm max-w-none [&_p]:mb-1 [&_strong]:text-white">
+                      <ReactMarkdown>{m.text}</ReactMarkdown>
+                    </div>
+                  ) : m.text}
                   {m.role === "assistant" && m.usage && (
                     <span className="ml-2 text-[10px] text-[#5a6b7c]">
                       [{m.usage.prompt}+{m.usage.completion} tok]
