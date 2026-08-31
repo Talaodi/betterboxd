@@ -742,7 +742,7 @@ pub fn recompute_movie_state(conn: &Connection, movie_id: i64) -> rusqlite::Resu
              FROM actions
              WHERE movie_id=?1 AND target='movie'
                AND json_extract(changes_json,'$.in_watchlist[1]') IS NOT NULL
-             ORDER BY at DESC LIMIT 1",
+             ORDER BY at DESC, rowid DESC LIMIT 1",
             rusqlite::params![movie_id],
             |r| r.get(0),
         )
@@ -837,8 +837,6 @@ mod state_tests {
             .unwrap();
         assert_eq!((mr, watched), (Some(85), 1));
 
-        // 独立改分时间必须严格晚于条目断言（同秒以 rowid 决胜，此处跨秒更稳）
-        std::thread::sleep(std::time::Duration::from_millis(1100));
         // 8 月建 Review 断言 95（edit, ref=review）→ 最终 95
         c.execute(
             "INSERT INTO reviews (id, movie_id, body_md, rating, created_at, updated_at)

@@ -58,9 +58,8 @@ pub async fn budget_check(db: &DbHandle, config: &Config) -> Result<(), String> 
     let ms = month_start();
     let rows = db
         .select_json(
-            &"SELECT input_cost, output_cost, currency, at FROM usage_records
-             WHERE currency IS NOT NULL"
-                .to_string(),
+            "SELECT input_cost, output_cost, currency, at FROM usage_records
+             WHERE currency IS NOT NULL",
         )
         .await
         .map_err(|e| e.to_string())?;

@@ -143,3 +143,10 @@ budget_monthly = 10.0
         assert_eq!(cfg.display.title_main, "zh");
     }
 }
+
+#[cfg(test)]
+impl Config {
+    pub fn default_for_test() -> Self {
+        serde_json::from_str("{\"tmdb\": {\"key\": \"\"}}").unwrap()
+    }
+}
