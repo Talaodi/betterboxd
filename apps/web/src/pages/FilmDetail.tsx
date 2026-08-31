@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { getJson, parseJsonArray, sendJson, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
+import ChatPanel from "../components/ChatPanel";
 import { StarsEditor } from "../components/Stars";
 
 type Detail = {
@@ -23,10 +24,6 @@ export default function FilmDetail() {
   const [showDiary, setShowDiary] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [chatMsgs, setChatMsgs] = useState<Record<string, { role: string; text: string }[]>>({});
-  const chatWsRef = useRef<WebSocket | null>(null);
-  const movieIdStr = id ?? "";
 
   const load = () => {
     getJson<Detail>(`/api/movie/${id}`)
@@ -42,44 +39,6 @@ export default function FilmDetail() {
     } catch (e) {
       alert(`状态修改失败: ${(e as Error).message}`);
     }
-  };
-
-  useEffect(() => {
-    if (!chatOpen || !movieIdStr) return;
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/chat?movie_id=${movieIdStr}`);
-    ws.onmessage = (ev) => {
-      const f = JSON.parse(ev.data);
-      if (f.type === "token") {
-        setChatMsgs((prev) => {
-          const arr = prev[movieIdStr] ?? [];
-          const last = arr[arr.length - 1];
-          if (last?.role === "assistant") {
-            const copy = { ...prev, [movieIdStr]: [...arr.slice(0, -1), { ...last, text: last.text + (f.data ?? "") }] };
-            return copy;
-          }
-          return { ...prev, [movieIdStr]: [...arr, { role: "assistant", text: f.data ?? "" }] };
-        });
-      } else if (f.type === "done" || f.type === "error") {
-        setChatMsgs((prev) => {
-          const arr = prev[movieIdStr] ?? [];
-          return { ...prev, [movieIdStr]: [...arr, { role: "system", text: f.type === "error" ? f.message : "" }] };
-        });
-      }
-    };
-    chatWsRef.current = ws;
-    return () => ws.close();
-  }, [chatOpen, movieIdStr]);
-
-  const sendChat = () => {
-    const text = chatInput.trim();
-    if (!text || !chatWsRef.current) return;
-    setChatMsgs((prev) => ({
-      ...prev,
-      [movieIdStr]: [...(prev[movieIdStr] ?? []), { role: "user", text }],
-    }));
-    setChatInput("");
-    chatWsRef.current.send(JSON.stringify({ type: "user", text }));
   };
 
   const filtered = useMemo(() => {
@@ -173,7 +132,7 @@ export default function FilmDetail() {
               + 写影评
             </button>
             <button
-              className="rounded border border-[#456] px-3 py-1.5 text-sm text-[#8899aa]"
+              className="block w-full rounded border border-[#456] px-3 py-1.5 text-center text-sm text-[#8899aa] hover:text-white"
               onClick={() => setChatOpen(true)}
             >
               💬 讨论
@@ -224,28 +183,17 @@ export default function FilmDetail() {
         </div>
       </div>
       {chatOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 flex w-[400px] flex-col border-l border-[#33414f] bg-[#14181c]">
-          <div className="flex items-center justify-between border-b border-[#2c3440] px-4 py-3">
-            <span className="text-sm font-medium">💬 陪看讨论</span>
+        <div className="fixed inset-y-0 right-0 z-40 flex w-[420px] flex-col border-l border-[#33414f] bg-[#14181c] p-4">
+          <div className="mb-2 flex justify-end">
             <button className="text-[#5a6b7c] hover:text-white" onClick={() => setChatOpen(false)}>✕</button>
           </div>
-          <div className="flex-1 space-y-3 overflow-y-auto p-4">
-            {(chatMsgs[movieIdStr] ?? []).map((m: any, i: number) => (
-              <div key={i} className={m.role === "user" ? "text-right" : "text-left"}>
-                <span className={"inline-block max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm " +
-                  (m.role === "user" ? "bg-[#2c3440]" : "bg-[#232b35]")}>{m.text}</span>
-              </div>
-            ))}
-          </div>
-          <div className="border-t border-[#2c3440] p-3">
-            <div className="flex gap-2">
-              <input className="flex-1 rounded border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm"
-                placeholder="聊聊这部电影…"
-                value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && sendChat()} />
-              <button className="rounded bg-[#00e054] px-3 py-2 text-sm text-[#0c1a10]"
-                onClick={sendChat}>发送</button>
-            </div>
+          <div className="min-h-0 flex-1">
+            <ChatPanel
+              movieId={m.tmdb_id}
+              movieTitle={m.title_main}
+              placeholder={`聊聊《${m.title_main}》…`}
+              hint={`和影迷助手聊聊《${m.title_main}》——它了解这部片和你的观影记录。`}
+            />
           </div>
         </div>
       )}

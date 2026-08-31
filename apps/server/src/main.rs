@@ -309,7 +309,8 @@ async fn reviews_list(State(app): State<App>) -> Response {
         .db
         .select_json(
             "SELECT review_id, movie_id, title, body_md, rating, liked, created_at,
-                    title_zh, title_sub FROM v_reviews_full ORDER BY created_at DESC LIMIT 200",
+                    title_zh, title_original AS title_sub, my_rating
+             FROM v_reviews_full ORDER BY created_at DESC LIMIT 200",
         )
         .await
     {
@@ -349,6 +350,56 @@ async fn review_delete(State(app): State<App>, AxPath(id): AxPath<String>) -> Re
     {
         Ok(v) => Json(v).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn lists_list(State(app): State<App>) -> Response {
+    match app
+        .db
+        .select_json(
+            "SELECT l.id, l.name, l.description, l.source, l.ranked, l.created_at, l.updated_at,
+                    (SELECT COUNT(*) FROM list_items li WHERE li.list_id = l.id) AS item_count
+             FROM lists l ORDER BY l.updated_at DESC",
+        )
+        .await
+    {
+        Ok(rows) => Json(json!({"lists": rows})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn list_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    // list id 为服务端生成的 uuid，仅允许安全字符（防注入）
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return (StatusCode::BAD_REQUEST, "非法清单 ID").into_response();
+    }
+    let meta = app
+        .db
+        .select_json(&format!(
+            "SELECT id, name, description, source, ranked, created_at, updated_at
+             FROM lists WHERE id='{id}'"
+        ))
+        .await;
+    let Ok(meta) = meta else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "查询失败").into_response();
+    };
+    let Some(m) = meta.into_iter().next() else {
+        return (StatusCode::NOT_FOUND, "清单不存在").into_response();
+    };
+    let ranked = m["ranked"].as_i64() == Some(1);
+    let order = if ranked { "rank IS NULL, rank" } else { "added_at" };
+    match app
+        .db
+        .select_json(&format!(
+            "SELECT li.rank, li.added_at, m.tmdb_id, m.title_main, m.title_sub, m.year,
+                    m.my_rating, m.liked, m.watched, m.posters
+             FROM list_items li JOIN v_movies m ON m.tmdb_id = li.movie_id
+             WHERE li.list_id='{id}' ORDER BY {order}"
+        ))
+        .await
+    {
+        Ok(rows) => Json(json!({ "list": m, "items": rows })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -677,7 +728,7 @@ async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>) {
                     my_rating, liked, in_watchlist, overview
              FROM v_movies WHERE tmdb_id={mid}"
         )).await {
-            if let Some(m) = rows.first() {
+            for m in rows.iter().take(1) {
                 ctx_parts.push(format!("影片: {} ({})", m["title_main"].as_str().unwrap_or("?"),
                     m["year"].as_str().unwrap_or("")));
                 if let Some(d) = m["directors"].as_str() { ctx_parts.push(format!("导演: {}", d)); }
@@ -873,15 +924,14 @@ async fn config_get(State(app): State<App>) -> Response {
 
 /// 配置写入。
 async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json::Value>) -> Response {
-    let mut cfg = app.config.lock().unwrap().clone();
+    let cfg = app.config.lock().unwrap().clone();
     if let Some(new_profiles) = new_cfg.get_mut("profiles").and_then(|p| p.as_array_mut()) {
         for (i, np) in new_profiles.iter_mut().enumerate() {
-            if let Some(key_str) = np.get("api_key").and_then(|k| k.as_str()) {
-                if key_str.contains("...") {
-                    if let Some(old) = cfg.profiles.get(i) {
-                        np["api_key"] = serde_json::json!(old.api_key.clone());
-                    }
-                }
+            let masked = np.get("api_key").and_then(|k| k.as_str()).map(|s| s.contains("...")).unwrap_or(false);
+            if masked
+                && let Some(old) = cfg.profiles.get(i)
+            {
+                np["api_key"] = serde_json::json!(old.api_key.clone());
             }
         }
     }
@@ -965,7 +1015,9 @@ async fn main() {
         .route("/api/stats/run", post(stats_run))
         .route("/api/saved-queries", get(saved_queries_list).post(saved_query_create))
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
-                .route("/api/chats", get(chats_list))
+        .route("/api/chats", get(chats_list))
+        .route("/api/lists", get(lists_list))
+        .route("/api/lists/{id}", get(list_detail))
         .route("/api/config", get(config_get).post(config_save))
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))
         .with_state(app);

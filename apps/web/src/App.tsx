@@ -4,9 +4,10 @@ import Diary from "./pages/Diary";
 import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
 import Chats from "./pages/Chats";
+import Reviews from "./pages/Reviews";
+import Lists from "./pages/Lists";
 import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
-import Placeholder from "./pages/Placeholder";
 
 const NAV = [
   { to: "/console", label: "控制台", icon: "💬" },
@@ -55,14 +56,8 @@ export default function App() {
             <Route path="/diary" element={<Diary />} />
             <Route path="/films" element={<Films />} />
             <Route path="/film/:id" element={<FilmDetail />} />
-            <Route
-              path="/reviews"
-              element={<Placeholder title="Reviews" note="M3：影评列表页" />}
-            />
-            <Route
-              path="/lists"
-              element={<Placeholder title="Lists" note="M5：清单管理页" />}
-            />
+            <Route path="/reviews" element={<Reviews />} />
+            <Route path="/lists" element={<Lists />} />
             <Route
               path="/chats"
               element={<Chats />}
