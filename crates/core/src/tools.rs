@@ -1146,7 +1146,6 @@ mod write_regression_tests {
     }
 }
 
-
 /// 条目桩懒拉取：详情缺失时拉 TMDB details+credits 补全（工具与 REST 共用）。
 pub async fn ensure_movie_details(
     tmdb: &TmdbClient,
@@ -1194,11 +1193,14 @@ pub async fn ensure_movie_details_opts(
                 .collect()
         })
         .unwrap_or_default();
-    let genres: Vec<String> = details["genres"].as_array().map(|g| {
-        g.iter()
-            .filter_map(|g| g["name"].as_str().map(String::from))
-            .collect()
-    }).unwrap_or_default();
+    let genres: Vec<String> = details["genres"]
+        .as_array()
+        .map(|g| {
+            g.iter()
+                .filter_map(|g| g["name"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
     let poster_owned = details["poster_path"].as_str().unwrap_or("").to_string();
     let backdrop_owned = details["backdrop_path"].as_str().unwrap_or("").to_string();
     let runtime = details["runtime"].as_i64();

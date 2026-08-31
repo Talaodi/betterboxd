@@ -102,11 +102,7 @@ impl TmdbClient {
     }
 
     /// 指定语言的详情（简介统一英文时用 en-US）。
-    pub async fn movie_details_in(
-        &self,
-        tmdb_id: i64,
-        language: &str,
-    ) -> Result<Value, String> {
+    pub async fn movie_details_in(&self, tmdb_id: i64, language: &str) -> Result<Value, String> {
         let url = format!(
             "https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={}&language={language}&append_to_response=credits",
             self.key
@@ -176,6 +172,9 @@ impl TmdbClient {
         if !resp.status().is_success() {
             return Err(format!("图片下载 HTTP {}", resp.status()));
         }
-        resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| e.to_string())
     }
 }
