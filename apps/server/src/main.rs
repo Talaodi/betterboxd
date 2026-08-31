@@ -9,7 +9,7 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use betterboxd_core::agent;
 use betterboxd_core::config::Config;
@@ -19,7 +19,7 @@ use betterboxd_core::tmdb::TmdbClient;
 use betterboxd_core::tools::{self, ToolCtx, ToolRegistry};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -466,6 +466,138 @@ async fn usage_summary(State(app): State<App>) -> Response {
         .into_response()
 }
 
+/// 直译管线：自然语言 → LLM 生成 SQL → 审查 → 执行 → 图表。
+/// 仪表盘"新建查询"与控制台 `/stats` 共用此端点。
+async fn stats_run(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let Some(nl) = args["nl"].as_str() else {
+        return (StatusCode::BAD_REQUEST, "缺少 nl（自然语言需求）").into_response();
+    };
+    let client = match &app.client {
+        Some(c) => c.clone(),
+        None => return (StatusCode::BAD_REQUEST, "未配置模型档案").into_response(),
+    };
+    let schema = betterboxd_core::agent::SCHEMA_DICTIONARY;
+    let prompt = format!(
+        "你是统计查询生成器。根据用户的自然语言需求，生成一条 SQLite SELECT 语句。\n\
+         只返回 JSON: {{\"sql\": \"...\", \"chart\": {{\"type\": \"bar|line|pie|table\", \"title\": \"...\"}}}}\n\
+         {schema}\n\
+         用户需求: {nl}"
+    );
+    let messages = vec![serde_json::json!({"role": "user", "content": prompt})];
+
+    // 重试 ≤2 次
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        let token = CancellationToken::new();
+        let outcome = client
+            .chat_stream(&messages, None, None, &token, |_| {})
+            .await;
+        let Ok(outcome) = outcome else {
+            last_err = "LLM 调用失败".into();
+            continue;
+        };
+        // 从回复中提取 JSON（可能被 markdown 代码块包裹）
+        let raw = outcome.text.trim();
+        let json_str = raw
+            .strip_prefix("```json").and_then(|s| s.strip_suffix("```"))
+            .or_else(|| raw.strip_prefix("```").and_then(|s| s.strip_suffix("```")))
+            .unwrap_or(raw)
+            .trim();
+        let parsed: Result<Value, _> = serde_json::from_str(json_str);
+        let Ok(query) = parsed else {
+            last_err = "LLM 回复不是有效 JSON".into();
+            continue;
+        };
+        let sql = query["sql"].as_str().unwrap_or_default().to_string();
+        let chart = query.get("chart").cloned().unwrap_or(json!({"type": "table"}));
+
+        match betterboxd_core::stats_guard::review_sql(&sql) {
+            Err(e) => { last_err = format!("SQL 审查未通过: {e}"); continue; }
+            Ok(()) => {
+                let sql_exec = if !sql.to_lowercase().contains("limit") {
+                    format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'))
+                } else {
+                    sql.trim_end_matches(';').to_string()
+                };
+                match app.db.select_json(&sql_exec).await {
+                    Ok(rows) => {
+                        return Json(json!({
+                            "ok": true, "sql": sql, "chart": chart,
+                            "columns": rows.first().map(|r| {
+                                r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()
+                            }).unwrap_or_default(),
+                            "rows": rows, "truncated": rows.len() >= 1000,
+                        })).into_response();
+                    }
+                    Err(e) => { last_err = format!("SQL 执行失败: {e}"); continue; }
+                }
+            }
+        }
+    }
+    (StatusCode::BAD_REQUEST, format!("直译管线 3 次尝试均失败: {last_err}")).into_response()
+}
+
+async fn saved_queries_list(State(app): State<App>) -> Response {
+    match app
+        .db
+        .select_json(
+            "SELECT id, name, payload_json, sort_order, last_run_at FROM saved_queries ORDER BY sort_order, created_at",
+        )
+        .await
+    {
+        Ok(rows) => Json(json!({"queries": rows})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn saved_query_create(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let Some(name) = args["name"].as_str().map(String::from) else {
+        return (StatusCode::BAD_REQUEST, "缺少 name").into_response();
+    };
+    let payload = args["payload"].to_string();
+    let id = uuid::Uuid::now_v7().to_string();
+    let id_reply = id.clone();
+    match app.db.call(move |c| {
+        c.execute(
+            "INSERT INTO saved_queries (id, name, payload_json, sort_order, created_at, last_run_at)
+             VALUES (?1,?2,?3,?4,?5,?5)",
+            rusqlite::params![id, name, payload, 0, betterboxd_core::now()],
+        )
+    })
+    .await
+    {
+        Ok(_) => Json(json!({"ok": true, "id": id_reply})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn saved_query_delete(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    match app.db.call(move |c| {
+        c.execute("DELETE FROM saved_queries WHERE id=?1", rusqlite::params![id])
+    })
+    .await
+    {
+        Ok(n) if n > 0 => Json(json!({"ok": true})).into_response(),
+        _ => (StatusCode::NOT_FOUND, "未找到").into_response(),
+    }
+}
+
+async fn chats_list(State(app): State<App>) -> Response {
+    match app
+        .db
+        .select_json(
+            "SELECT s.id, s.scope, s.movie_id, s.title, s.created_at, s.last_message_at,
+                    m.title_main AS movie_title, m.tmdb_id
+             FROM chat_sessions s LEFT JOIN movies m ON m.tmdb_id = s.movie_id
+             ORDER BY s.last_message_at DESC LIMIT 200",
+        )
+        .await
+    {
+        Ok(rows) => Json(json!({"chats": rows})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 /// 打断后的确认卡直连执行（design.md 打断三段语义③）。
 async fn tools_execute(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
     let Some(name) = args["name"].as_str().map(String::from) else {
@@ -737,6 +869,10 @@ async fn main() {
         .route("/api/backdrop/{id}", get(backdrop))
         .route("/api/usage/summary", get(usage_summary))
         .route("/api/tools/execute", post(tools_execute))
+        .route("/api/stats/run", post(stats_run))
+        .route("/api/saved-queries", get(saved_queries_list).post(saved_query_create))
+        .route("/api/saved-queries/{id}", delete(saved_query_delete))
+        .route("/api/chats", get(chats_list))
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))
         .with_state(app);
 

@@ -3,6 +3,8 @@ import Console from "./pages/Console";
 import Diary from "./pages/Diary";
 import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
+import Chats from "./pages/Chats";
+import Stats from "./pages/Stats";
 import Placeholder from "./pages/Placeholder";
 
 const NAV = [
@@ -61,11 +63,11 @@ export default function App() {
             />
             <Route
               path="/chats"
-              element={<Placeholder title="Chats" note="M3：全部会话页" />}
+              element={<Chats />}
             />
             <Route
               path="/stats"
-              element={<Placeholder title="Stats" note="M3：统计仪表盘" />}
+              element={<Stats />}
             />
             <Route
               path="/settings"
