@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { getJson, parseJsonArray, posterUrl, sendJson, type LogRow, type MovieRow } from "../api";
+import { getJson, parseJsonArray, sendJson, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import { StarsEditor } from "../components/Stars";
 
@@ -51,65 +51,91 @@ export default function FilmDetail() {
 
   return (
     <div className="pb-10">
-      {/* hero（海报悬垂到内容区，避免裁切） */}
+      {/* LB 式顶部剧照横幅（无剧照时退化为渐变） */}
       <div
-        className="h-56 bg-cover bg-center"
+        className="mb-6 h-64 bg-cover bg-center"
         style={{
-          backgroundImage: `linear-gradient(rgba(20,24,28,0.45), #14181c), url(${posterUrl(m.tmdb_id)})`,
+          backgroundImage: `linear-gradient(rgba(20,24,28,0.25), #14181c 92%), url(/api/backdrop/${m.tmdb_id})`,
         }}
       />
       <div className="mx-auto max-w-[1100px] px-6">
-        <div className="-mt-32 flex items-end gap-6 pb-2">
-          <Poster tmdbId={m.tmdb_id} title={m.title_main} size="detail" className="shrink-0 shadow-xl" />
-          <div className="flex-1 pb-3">
-            <h1 className="text-2xl font-bold">
-              {m.title_main}
-              <span className="ml-3 text-base font-normal text-[#8899aa]">{m.title_sub}</span>
-            </h1>
-            <p className="mt-2 text-sm text-[#8899aa]">
-              {m.year} · {directors} · {m.runtime ?? "?"}min
-              {genres.length > 0 && ` · ${genres.join(" / ")}`}
-            </p>
-            {m.lb_rating !== null && m.lb_rating !== undefined && (
-              <p className="mt-1 text-sm text-[#5a6b7c]">
-                Letterboxd 参考 {m.lb_rating}（{m.lb_votes} 人）
-              </p>
+      {/* LB 式三栏：海报+动作面板 | 标题与信息 */}
+      <div className="flex gap-8">
+        {/* 左：海报 */}
+        <div className="w-[210px] shrink-0">
+          <Poster tmdbId={m.tmdb_id} title={m.title_main} size="detail" className="shadow-xl" />
+        </div>
+
+        {/* 中：标题与信息 */}
+        <div className="min-w-0 flex-1">
+          <h1 className="text-4xl font-bold leading-tight">{m.title_main}</h1>
+          <p className="mt-2 text-sm text-[#8899aa]">
+            {m.year}
+            {m.title_original && m.title_original !== m.title_main && (
+              <span className="ml-2 italic">‘{m.title_original}’</span>
             )}
-            {m.tagline && <p className="mt-2 text-sm italic text-[#40bcf4]">“{m.tagline}”</p>}
+            {directors && <span className="ml-2">Directed by {directors}</span>}
+          </p>
+          {m.tagline && (
+            <p className="mt-4 text-xs uppercase tracking-widest text-[#8899aa]">{m.tagline}</p>
+          )}
+          <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-[#c8d2dc]">
+            {m.overview}
+          </p>
+          <p className="mt-4 text-xs text-[#5a6b7c]">
+            {m.runtime ? `${m.runtime} mins` : ""}
+            {genres.length > 0 && ` · ${genres.join(" / ")}`}
+          </p>
+          {m.lb_rating !== null && m.lb_rating !== undefined && (
+            <p className="mt-1 text-xs text-[#5a6b7c]">
+              Letterboxd 参考 {m.lb_rating}（{m.lb_votes} 人）
+            </p>
+          )}
+        </div>
+
+        {/* 右：动作面板（LB 式竖排） */}
+        <div className="w-[210px] shrink-0 rounded-lg border border-[#33414f] bg-[#1b222b] p-4">
+          <div className="flex justify-around pb-3">
+            <button
+              className={"flex flex-col items-center text-xs " +
+                (m.in_watchlist ? "text-[#ff8000]" : "text-[#8899aa]")}
+              onClick={() => setState({ in_watchlist: !m.in_watchlist })}
+            >
+              <span className="text-xl">🔖</span>
+              想看
+            </button>
+            <button
+              className={"flex flex-col items-center text-xs " +
+                (m.liked ? "text-[#00e054]" : "text-[#8899aa]")}
+              onClick={() => setState({ liked: !m.liked })}
+            >
+              <span className="text-xl">♥</span>
+              喜欢
+            </button>
+          </div>
+          <div className="border-t border-[#2c3440] pt-3">
+            <p className="mb-1 text-center text-xs text-[#8899aa]">Rate</p>
+            <StarsEditor value={m.my_rating} onChange={(v) => setState({ my_rating: v })} />
+          </div>
+          <div className="mt-3 space-y-2 border-t border-[#2c3440] pt-3">
+            <button
+              className="block w-full rounded bg-[#00e054] px-3 py-1.5 text-center text-sm font-medium text-[#0c1a10]"
+              onClick={() => setShowDiary(true)}
+            >
+              + 记一笔
+            </button>
+            <button
+              className="block w-full rounded border border-[#40bcf4] px-3 py-1.5 text-center text-sm text-[#40bcf4]"
+              onClick={() => setShowReview(true)}
+            >
+              + 写影评
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="mx-auto max-w-[1100px] px-6">
-        {/* 动作条 */}
-        <div className="my-4 flex items-center gap-4 rounded-lg border border-[#2c3440] bg-[#1b222b] p-3">
-          <button
-            className={"rounded border px-3 py-1.5 text-sm " +
-              (m.in_watchlist ? "border-[#ff8000] text-[#ff8000]" : "border-[#456] text-[#8899aa]")}
-            onClick={() => setState({ in_watchlist: !m.in_watchlist })}
-          >
-            🔖 想看
-          </button>
-          <button
-            className={"text-2xl " + (m.liked ? "text-[#00e054]" : "text-[#3a4653]")}
-            onClick={() => setState({ liked: !m.liked })}
-            title="喜欢"
-          >
-            ♥
-          </button>
-          <StarsEditor
-            value={m.my_rating}
-            onChange={(v) => {
-              if (v === null) return; // 同分清除手势 → 忽略，不报错
-              setState({ my_rating: v });
-            }}
-          />
-          <span className="ml-auto text-xs text-[#5a6b7c]">
-            {m.watched ? "已看" : "未看"}
-          </span>
-        </div>
-
-        {/* Log Tab + 创建入口 */}
+      {/* Log Tab + 流 */}
+      <div className="mt-8">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex gap-1">
             {[["all", "全部"], ["watch", "看"], ["review", "评"], ["chat", "聊"]].map(([k, label]) => (
@@ -123,26 +149,19 @@ export default function FilmDetail() {
               </button>
             ))}
           </div>
-          <div className="flex gap-2">
-            <button
-              className="rounded bg-[#00e054] px-3 py-1.5 text-sm text-[#0c1a10]"
-              onClick={() => setShowDiary(true)}
-            >
-              + 记一笔
-            </button>
-            <button
-              className="rounded border border-[#40bcf4] px-3 py-1.5 text-sm text-[#40bcf4]"
-              onClick={() => setShowReview(true)}
-            >
-              + 写影评
-            </button>
-          </div>
+          {detail.lists.length > 0 && (
+            <div className="text-xs">
+              {detail.lists.map((l) => (
+                <span key={l.list_id} className="mr-2 rounded bg-[#2c3440] px-2 py-1">
+                  {l.ranked && l.rank ? `Rank #${l.rank} in ${l.name}` : `In ${l.name}`}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-
-        {/* Log 流 */}
         <div className="space-y-2">
           {filtered.length === 0 && <p className="text-sm text-[#5a6b7c]">暂无记录</p>}
-          {filtered.map((l) => (
+          {filtered.map((l: LogRow) => (
             <div key={l.kind + l.id} className="rounded border border-[#2c3440] bg-[#1b222b] px-3 py-2 text-sm">
               <span
                 className="mr-2 rounded px-1 text-xs"
@@ -155,23 +174,11 @@ export default function FilmDetail() {
             </div>
           ))}
         </div>
-
-        {/* List 归属 */}
-        {detail.lists.length > 0 && (
-          <div className="mt-4 text-sm">
-            {detail.lists.map((l) => (
-              <span key={l.list_id} className="mr-2 rounded bg-[#2c3440] px-2 py-1 text-xs">
-                {l.ranked && l.rank ? `Rank #${l.rank} in ${l.name}` : `In ${l.name}`}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
+      </div>
       {showDiary && <DiaryModal movieId={m.tmdb_id} onClose={() => { setShowDiary(false); load(); }} onSaved={() => { setShowDiary(false); load(); }} />}
-      {showReview && (
-        <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />
-      )}
+      {showReview && <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />}
     </div>
   );
 }
@@ -266,10 +273,7 @@ function DiaryModal({
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
-          <button
-            className="text-xs text-[#40bcf4]"
-            onClick={() => setAdvanced(!advanced)}
-          >
+          <button className="text-xs text-[#40bcf4]" onClick={() => setAdvanced(!advanced)}>
             {advanced ? "收起 Advanced ▲" : "Advanced（维度与标签）▼"}
           </button>
           {advanced && (

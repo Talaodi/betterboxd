@@ -1160,7 +1160,8 @@ pub async fn ensure_movie_details(
     let runtime = details["runtime"].as_i64();
     db.call(move |c| {
         c.execute(
-            "UPDATE movies SET directors=?2, genres=?3, runtime=COALESCE(?4, runtime),
+            "UPDATE movies SET release_date=COALESCE(json_extract(?5,'$.release_date'), release_date),
+               directors=?2, genres=?3, runtime=COALESCE(?4, runtime),
                tagline=COALESCE(json_extract(?5,'$.tagline'), tagline),
                overview=COALESCE(json_extract(?5,'$.overview'), overview),
                posters=?6, backdrop_path=?8, fetched_at=?7 WHERE tmdb_id=?1",

@@ -24,6 +24,7 @@ export type MovieRow = {
   tmdb_id: number;
   title_main: string;
   title_sub: string;
+  title_original?: string | null;
   year: string | null;
   my_rating: number | null;
   liked: number;
@@ -45,7 +46,9 @@ export type DiaryRow = {
   movie_id: number;
   title_main: string;
   title_sub: string;
+  title_original?: string | null;
   watched_date: string;
+  year: string | null;
   rating: number | null;
   my_rating: number | null;
   liked: number;
