@@ -1140,7 +1140,10 @@ pub async fn ensure_movie_details(
     if !need_fetch {
         return Ok(());
     }
-    let details = tmdb.movie_details(movie_id).await.map_err(|e| e.to_string())?;
+    let details = tmdb
+        .movie_details_in(movie_id, "en-US")
+        .await
+        .map_err(|e| e.to_string())?;
     let directors: Vec<String> = details["credits"]["crew"]
         .as_array()
         .map(|crew| {
@@ -1164,7 +1167,10 @@ pub async fn ensure_movie_details(
                directors=?2, genres=?3, runtime=COALESCE(?4, runtime),
                tagline=COALESCE(json_extract(?5,'$.tagline'), tagline),
                overview=COALESCE(json_extract(?5,'$.overview'), overview),
-               posters=?6, backdrop_path=?8, fetched_at=?7 WHERE tmdb_id=?1",
+               posters=?6, backdrop_path=?8,
+               tmdb_rating=COALESCE(?9, tmdb_rating),
+               tmdb_votes=COALESCE(?10, tmdb_votes),
+               fetched_at=?7 WHERE tmdb_id=?1",
             rusqlite::params![
                 movie_id,
                 serde_json::to_string(&directors).unwrap(),
@@ -1174,6 +1180,8 @@ pub async fn ensure_movie_details(
                 serde_json::to_string(&vec![poster_owned]).unwrap(),
                 crate::now(),
                 backdrop_owned,
+                details["vote_average"].as_f64(),
+                details["vote_count"].as_i64(),
             ],
         )
     })

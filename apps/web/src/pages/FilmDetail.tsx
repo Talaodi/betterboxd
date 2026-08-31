@@ -50,15 +50,7 @@ export default function FilmDetail() {
   const genres = parseJsonArray(m.genres);
 
   return (
-    <div className="pb-10">
-      {/* LB 式顶部剧照横幅（无剧照时退化为渐变） */}
-      <div
-        className="mb-6 h-64 bg-cover bg-center"
-        style={{
-          backgroundImage: `linear-gradient(rgba(20,24,28,0.25), #14181c 92%), url(/api/backdrop/${m.tmdb_id})`,
-        }}
-      />
-      <div className="mx-auto max-w-[1100px] px-6">
+    <div className="mx-auto max-w-[1100px] px-6 pt-6">
       {/* LB 式三栏：海报+动作面板 | 标题与信息 */}
       <div className="flex gap-8">
         {/* 左：海报 */}
@@ -174,8 +166,6 @@ export default function FilmDetail() {
             </div>
           ))}
         </div>
-      </div>
-
       </div>
       {showDiary && <DiaryModal movieId={m.tmdb_id} onClose={() => { setShowDiary(false); load(); }} onSaved={() => { setShowDiary(false); load(); }} />}
       {showReview && <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />}

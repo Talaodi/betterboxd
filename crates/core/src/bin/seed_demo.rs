@@ -546,7 +546,7 @@ async fn main() {
             continue;
         };
         let tmdb_id = first["tmdb_id"].as_i64().unwrap_or(0);
-        let details = match tmdb.movie_details(tmdb_id).await {
+        let details = match tmdb.movie_details_in(tmdb_id, "en-US").await {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("  ⚠ {title} 详情失败: {e}");
@@ -571,12 +571,13 @@ async fn main() {
             })
             .unwrap_or_default();
         let poster = details["poster_path"].as_str().unwrap_or("").to_string();
+        let backdrop_owned = details["backdrop_path"].as_str().unwrap_or("").to_string();
         let inserted = conn
             .execute(
                 "INSERT INTO movies (tmdb_id, title_zh, title_en, title_original, release_date,
                runtime, original_language, directors, genres, posters, tagline, overview,
-               lb_rating, lb_votes, in_watchlist, fetched_at, updated_at)
-             VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)",
+               tmdb_rating, tmdb_votes, backdrop_path, in_watchlist, fetched_at, updated_at)
+             VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)",
                 params![
                     tmdb_id,
                     first["title"].as_str().unwrap_or(""),
@@ -591,6 +592,7 @@ async fn main() {
                     details["overview"].as_str().unwrap_or(""),
                     details["vote_average"].as_f64(),
                     details["vote_count"].as_i64(),
+                    backdrop_owned,
                     *watchlist as i64,
                     now(),
                 ],

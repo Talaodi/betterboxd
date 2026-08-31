@@ -100,6 +100,34 @@ impl TmdbClient {
         self.get(&format!("/movie/{tmdb_id}"), "append_to_response=credits")
             .await
     }
+
+    /// 指定语言的详情（简介统一英文时用 en-US）。
+    pub async fn movie_details_in(
+        &self,
+        tmdb_id: i64,
+        language: &str,
+    ) -> Result<Value, String> {
+        let url = format!(
+            "https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={}&language={language}&append_to_response=credits",
+            self.key
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("TMDB 网络错误: {e}"))?;
+        let status = resp.status();
+        let body: Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("TMDB 响应解析失败: {e}"))?;
+        if !status.is_success() {
+            let msg = body["status_message"].as_str().unwrap_or("");
+            return Err(format!("TMDB HTTP {status}: {msg}"));
+        }
+        Ok(body)
+    }
 }
 
 /// 最小 URL 编码（保留字母数字与 -_.~）。
