@@ -669,7 +669,34 @@ async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>) {
         let token = CancellationToken::new();
         *cancel.lock().unwrap() = Some(token.clone());
 
-        let Some(client) = app.client.clone() else {
+        // 构建 movie 上下文注入（scope=movie 时）
+    let context_injection = if let Some(mid) = ws_movie_id {
+        let mut ctx_parts = Vec::new();
+        if let Ok(rows) = app.db.select_json(&format!(
+            "SELECT title_main, title_sub, year, directors, genres, runtime,
+                    my_rating, liked, in_watchlist, overview
+             FROM v_movies WHERE tmdb_id={mid}"
+        )).await {
+            if let Some(m) = rows.first() {
+                ctx_parts.push(format!("影片: {} ({})", m["title_main"].as_str().unwrap_or("?"),
+                    m["year"].as_str().unwrap_or("")));
+                if let Some(d) = m["directors"].as_str() { ctx_parts.push(format!("导演: {}", d)); }
+                if let Some(r) = m["my_rating"].as_i64() { ctx_parts.push(format!("我的最终评分: {r}")); }
+                if m["in_watchlist"].as_i64() == Some(1) { ctx_parts.push("在想看清单".into()); }
+            }
+        }
+        if let Ok(logs) = app.db.select_json(&format!(
+            "SELECT kind, at, brief FROM v_logs WHERE movie_id={mid} ORDER BY at DESC LIMIT 10"
+        )).await {
+            let log_strs: Vec<String> = logs.iter()
+                .map(|l| format!("{} {}: {}", l["kind"].as_str().unwrap_or(""), l["at"].as_str().unwrap_or(""), l["brief"].as_str().unwrap_or("")))
+                .collect();
+            if !log_strs.is_empty() { ctx_parts.push(format!("最近记录:\n{}", log_strs.join("\n"))); }
+        }
+        ctx_parts.join("\n")
+    } else { String::new() };
+
+    let Some(client) = app.client.clone() else {
             let _ = tx.send(Message::Text(
                 serde_json::json!({"type": "error",
                     "message": "未配置模型档案，请先在设置页或 config.toml 配置"})
@@ -725,6 +752,7 @@ async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>) {
                 &ctx,
                 &mut task_session.messages,
                 &user_text,
+                &context_injection,
                 token,
                 on_event,
             )

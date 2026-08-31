@@ -112,6 +112,7 @@ pub async fn run(
     ctx: &ToolCtx,
     messages: &mut Vec<Value>,
     user_text: &str,
+    context_injection: &str,
     cancel: CancellationToken,
     mut on_event: impl FnMut(AgentEvent) + Send,
 ) -> Result<RunSummary, String> {
@@ -130,6 +131,9 @@ pub async fn run(
          {SCHEMA_DICTIONARY}\n\
          【隐私】用户的观影随记仅本地保存，你可以引用但不要复述到可导出内容中。"
     );
+    if !context_injection.is_empty() {
+        system.push_str(&format!("\n【当前上下文】\n{context_injection}"));
+    }
     if let Ok(p) = config.active() {
         system.push_str(&format!("\n【当前模型档案】{}", p.name));
     }
