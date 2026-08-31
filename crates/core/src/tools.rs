@@ -646,6 +646,30 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             let liked = get_bool(&args, "liked").unwrap_or(false);
             let price = get_i64(&args, "ticket_price_cents");
             let note = get_str(&args, "note").unwrap_or("").to_string();
+            // 同片同日查重（与 CSV 导入同语义）：疑似重复先警告
+            if !get_bool(&args, "override_confirmed").unwrap_or(false) {
+                let mid = movie_id;
+                let wd = watched_date.clone();
+                let dup: Option<String> = ctx
+                    .db
+                    .call(move |c| {
+                        Ok(c.query_row(
+                            "SELECT id FROM diary_entries WHERE movie_id=?1 AND watched_date=?2 LIMIT 1",
+                            rusqlite::params![mid, wd],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .ok())
+                    })
+                    .await
+                    .unwrap_or(None);
+                if let Some(dup_id) = dup {
+                    return Ok(json!({
+                        "warning": "该影片当天已有观影记录，疑似重复",
+                        "duplicate_entry_id": dup_id,
+                        "require_confirmation": true
+                    }));
+                }
+            }
             let entry_id = uuid::Uuid::now_v7().to_string();
             let entry_reply = entry_id.clone();
             let at = crate::now();
@@ -1129,14 +1153,28 @@ pub async fn ensure_movie_details(
     db: &DbHandle,
     movie_id: i64,
 ) -> Result<(), String> {
+    ensure_movie_details_opts(tmdb, db, movie_id, false).await
+}
+
+/// force=false 时：fetched_at 为空 **或关键字段缺失**（评分参考/英文简介）
+/// 都会触发拉取——旧桩不会因 fetched_at 置位而永久卡死在搜索级字段。
+pub async fn ensure_movie_details_opts(
+    tmdb: &TmdbClient,
+    db: &DbHandle,
+    movie_id: i64,
+    force: bool,
+) -> Result<(), String> {
     let need_fetch: bool = db
         .call(move |c| {
-            Ok(c.query_row(
-                "SELECT COALESCE(fetched_at IS NULL, 1) FROM movies WHERE tmdb_id=?1",
-                rusqlite::params![movie_id],
-                |r| Ok(r.get::<_, i64>(0)? != 0),
-            )
-            .unwrap_or(true))
+            Ok(force
+                || c.query_row(
+                    "SELECT COALESCE(fetched_at IS NULL, 1) + COALESCE(tmdb_rating IS NULL, 1)
+                       + COALESCE(overview IS NULL OR overview = '', 1) > 0
+                     FROM movies WHERE tmdb_id=?1",
+                    rusqlite::params![movie_id],
+                    |r| Ok(r.get::<_, i64>(0)? > 0),
+                )
+                .unwrap_or(true))
         })
         .await
         .map_err(|e| e.to_string())?;
