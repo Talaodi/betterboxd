@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import ChatPanel from "../components/ChatPanel";
-import { DiaryCard, ReviewCard, ChatCard } from "../components/Cards";
+import DiaryEntryRow from "../components/DiaryEntryRow";
+import ReviewPosterCard from "../components/ReviewPosterCard";
+import ChatListRow from "../components/ChatListRow";
 import { StarsEditor } from "../components/Stars";
 
 type Detail = {
@@ -12,14 +14,9 @@ type Detail = {
   lists: { list_id: string; name: string; rank: number | null; ranked: number }[];
 };
 
-const KIND_BADGE: Record<string, { label: string; color: string }> = {
-  watch: { label: "看", color: "#00e054" },
-  review: { label: "评", color: "#40bcf4" },
-  chat: { label: "聊", color: "#8899aa" },
-};
-
 export default function FilmDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [tab, setTab] = useState("all");
   const [showDiary, setShowDiary] = useState(false);
@@ -46,6 +43,27 @@ export default function FilmDetail() {
     if (!detail) return [];
     return tab === "all" ? detail.logs : detail.logs.filter((l) => l.kind === tab);
   }, [detail, tab]);
+
+  // 连续同类型日志合并为一段（整体保持时间序，可出现多个同类型段）
+  const segments = useMemo(() => {
+    const segs: { kind: string; rows: LogRow[] }[] = [];
+    for (const l of filtered) {
+      const last = segs[segs.length - 1];
+      if (last && last.kind === l.kind) last.rows.push(l);
+      else segs.push({ kind: l.kind, rows: [l] });
+    }
+    return segs;
+  }, [filtered]);
+
+  const delEntry = async (entryId: string) => {
+    if (!window.confirm("删除这条观影记录？（Action 账目会保留并回退状态）")) return;
+    try {
+      await sendJson(`/api/diary/${entryId}`, "DELETE");
+      load();
+    } catch (e) {
+      alert(`删除失败: ${(e as Error).message}`);
+    }
+  };
 
   if (!detail) return <p className="p-6 text-[#5a6b7c]">加载中…</p>;
   const m = detail.movie;
@@ -167,36 +185,66 @@ export default function FilmDetail() {
             </div>
           )}
         </div>
-        <div className="space-y-2">
+        {/* Log 段：整体按时间排列，连续同类型日志合并为一段，每段按对应页面样式渲染 */}
+        <div className="space-y-6">
           {filtered.length === 0 && <p className="text-sm text-[#5a6b7c]">暂无记录</p>}
-          {filtered.map((l: LogRow) => {
-            if (l.kind === "watch" && l.diary) {
-              const d = l.diary as unknown as DiaryRow;
-              return <DiaryCard key={l.kind + l.id} entry={{ ...d, entry_id: l.id }} />;
-            }
-            if (l.kind === "review" && l.review) {
-              return (
-                <ReviewCard
-                  key={l.kind + l.id}
-                  review={l.review as never}
-                />
-              );
-            }
-            if (l.kind === "chat") {
-              return (
-                <ChatCard key={l.kind + l.id} sessionId={l.id} title={l.brief} date={l.at} />
-              );
-            }
-            return (
-              <div key={l.kind + l.id} className="rounded-lg border border-[#2c3440] bg-[#1b222b] px-3 py-2 text-sm">
-                <span className="mr-2 rounded px-1 text-xs" style={{ color: KIND_BADGE[l.kind]?.color }}>
-                  {KIND_BADGE[l.kind]?.label}
-                </span>
-                <span className="text-[#8899aa]">{l.at}</span>
-                <span className="ml-2">{l.brief}</span>
-              </div>
-            );
-          })}
+          {segments.map((seg, si) => (
+            <div key={si}>
+              <p className="mb-1.5 px-2 text-xs font-medium tracking-widest text-[#5a6b7c]">
+                {seg.kind === "watch" ? "DIARY" : seg.kind === "review" ? "REVIEWS" : "CHATS"}
+              </p>
+              {seg.kind === "watch" && (
+                <div className="border-t border-[#2c3440]">
+                  {seg.rows.map((l, ri) => {
+                    const d = l.diary as unknown as DiaryRow | undefined;
+                    if (!d) return null;
+                    const entry: DiaryRow = { ...d, entry_id: l.id };
+                    const prev = seg.rows[ri - 1];
+                    const firstOfMonth =
+                      !prev || prev.at.slice(0, 7) !== l.at.slice(0, 7);
+                    return (
+                      <DiaryEntryRow
+                        key={l.kind + l.id}
+                        entry={entry}
+                        firstOfMonth={firstOfMonth}
+                        onDelete={delEntry}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+              {seg.kind === "review" && (
+                <div className="space-y-4">
+                  {seg.rows.map((l) =>
+                    l.review ? (
+                      <ReviewPosterCard
+                        key={l.kind + l.id}
+                        review={l.review as never}
+                        movieId={m.tmdb_id}
+                        movieTitle={m.title_main}
+                        titleSub={m.title_sub || null}
+                      />
+                    ) : null,
+                  )}
+                </div>
+              )}
+              {seg.kind === "chat" && (
+                <div>
+                  {seg.rows.map((l) => (
+                    <ChatListRow
+                      key={l.kind + l.id}
+                      sessionId={l.id}
+                      title={l.brief}
+                      subtitle={l.at}
+                      tmdbId={m.tmdb_id}
+                      movieTitle={m.title_main}
+                      onClick={() => navigate(`/chats?open=${l.id}`)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
       {chatOpen && (

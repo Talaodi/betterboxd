@@ -1,5 +1,4 @@
-import { HashRouter, NavLink, Route, Routes } from "react-router-dom";
-import Console from "./pages/Console";
+import { HashRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import Diary from "./pages/Diary";
 import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
@@ -10,12 +9,11 @@ import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
 
 const NAV = [
-  { to: "/console", label: "控制台", icon: "💬" },
+  { to: "/chats", label: "Chats", icon: "🗂" },
   { to: "/diary", label: "Diary", icon: "📔" },
   { to: "/reviews", label: "Reviews", icon: "✍" },
   { to: "/films", label: "Films", icon: "🎞" },
   { to: "/lists", label: "Lists", icon: "📋" },
-  { to: "/chats", label: "Chats", icon: "🗂" },
   { to: "/stats", label: "Stats", icon: "📊" },
 ];
 
@@ -44,32 +42,23 @@ export default function App() {
             </NavLink>
           ))}
           <div className="mt-auto px-4 py-3 text-xs text-[#5a6b7c]">
-            v0.1.0 · M2c
+            v0.1.0 · M3
           </div>
         </nav>
 
         {/* 主内容 */}
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 min-w-0 overflow-y-auto">
           <Routes>
-            <Route path="/" element={<Console />} />
-            <Route path="/console" element={<Console />} />
+            <Route path="/" element={<Navigate to="/chats" replace />} />
+            <Route path="/console" element={<Navigate to="/chats" replace />} />
             <Route path="/diary" element={<Diary />} />
             <Route path="/films" element={<Films />} />
             <Route path="/film/:id" element={<FilmDetail />} />
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/lists" element={<Lists />} />
-            <Route
-              path="/chats"
-              element={<Chats />}
-            />
-            <Route
-              path="/stats"
-              element={<Stats />}
-            />
-            <Route
-              path="/settings"
-              element={<Settings />}
-            />
+            <Route path="/chats" element={<Chats />} />
+            <Route path="/stats" element={<Stats />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>
       </div>

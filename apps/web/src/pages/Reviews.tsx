@@ -1,11 +1,7 @@
-/** Reviews 页（requirement 4）：卡片左侧海报占满固定高度，右侧内容
- *  收起时裁切到海报高度，可展开全文。 */
+/** Reviews 页：海报卡列表（渲染复用 ReviewPosterCard）。 */
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { getJson, sendJson } from "../api";
-import Poster from "../components/Poster";
-import { StarsDisplay } from "../components/Stars";
-import { Markdown } from "../components/ChatPanel";
+import ReviewPosterCard from "../components/ReviewPosterCard";
 
 type ReviewRow = {
   review_id: string;
@@ -20,11 +16,8 @@ type ReviewRow = {
   my_rating: number | null;
 };
 
-const POSTER_H = 168; // 海报固定高度（px），收起时右侧内容裁切到此高度
-
 export default function Reviews() {
   const [reviews, setReviews] = useState<ReviewRow[] | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     getJson<{ reviews: ReviewRow[] }>("/api/reviews")
@@ -43,14 +36,6 @@ export default function Reviews() {
     }
   };
 
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
   if (!reviews) return <p className="p-6 text-[#5a6b7c]">加载中…</p>;
 
   return (
@@ -61,72 +46,26 @@ export default function Reviews() {
       </div>
       {reviews.length === 0 && (
         <p className="text-sm text-[#5a6b7c]">
-          还没有影评。去影片详情页点「+ 写影评」，或直接在控制台对助手说。
+          还没有影评。去影片详情页点「+ 写影评」，或直接对助手说。
         </p>
       )}
       <div className="space-y-4">
-        {reviews.map((r) => {
-          const open = expanded.has(r.review_id);
-          return (
-            <article key={r.review_id} className="overflow-hidden rounded-lg border border-[#2c3440] bg-[#1b222b]">
-              <div className="flex gap-4">
-                {/* 左：海报（固定高度，收起时与右侧等高） */}
-                <Link to={`/film/${r.movie_id}`} className="shrink-0 self-start">
-                  <Poster
-                    tmdbId={r.movie_id}
-                    title={r.title_zh}
-                    size="grid"
-                    className="h-[168px]! w-[112px]! object-cover"
-                  />
-                </Link>
-
-                {/* 右：收起时整体裁切到海报高度 */}
-                <div className="min-w-0 flex-1 py-3 pr-4">
-                  <div
-                    className={open ? "" : "overflow-hidden"}
-                    style={open ? undefined : { maxHeight: POSTER_H - 24 }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs text-[#5a6b7c]">
-                          <Link to={`/film/${r.movie_id}`} className="hover:text-[#40bcf4]">
-                            {r.title_zh}
-                            {r.title_sub && r.title_sub !== r.title_zh && (
-                              <span className="ml-1 italic">({r.title_sub})</span>
-                            )}
-                          </Link>
-                          <span className="ml-2">
-                            {new Date(r.created_at * 1000).toISOString().slice(0, 10)}
-                          </span>
-                        </p>
-                        <h2 className="mt-1 text-base font-medium">{r.title || "无题"}</h2>
-                        <div className="mt-1 flex items-center gap-3">
-                          <StarsDisplay value={r.rating} />
-                          {r.liked === 1 && <span className="text-sm text-[#00e054]">♥</span>}
-                        </div>
-                      </div>
-                      <button
-                        className="shrink-0 text-xs text-[#5a6b7c] hover:text-[#ff8000]"
-                        onClick={() => del(r)}
-                      >
-                        删除
-                      </button>
-                    </div>
-                    <div className="mt-2">
-                      <Markdown>{r.body_md}</Markdown>
-                    </div>
-                  </div>
-                  <button
-                    className="mt-1 text-xs text-[#40bcf4]"
-                    onClick={() => toggle(r.review_id)}
-                  >
-                    {open ? "收起 ▲" : "展开全文 ▼"}
-                  </button>
-                </div>
-              </div>
-            </article>
-          );
-        })}
+        {reviews.map((r) => (
+          <ReviewPosterCard
+            key={r.review_id}
+            review={{
+              title: r.title,
+              body_md: r.body_md,
+              rating: r.rating,
+              liked: r.liked,
+              created_at: r.created_at,
+            }}
+            movieId={r.movie_id}
+            movieTitle={r.title_zh}
+            titleSub={r.title_sub}
+            onDelete={() => del(r)}
+          />
+        ))}
       </div>
     </div>
   );

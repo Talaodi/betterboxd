@@ -224,7 +224,8 @@ async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Respon
         .db
         .select_json(&format!(
             "SELECT entry_id, watched_date, rating, liked, in_theater, ticket_price_cents,
-                    private_note, rewatch_index, tags, dimensions_flat
+                    private_note, rewatch_index, tags, dimensions_flat,
+                    title_main, title_sub, year
              FROM v_diary_full WHERE movie_id={id}"
         ))
         .await

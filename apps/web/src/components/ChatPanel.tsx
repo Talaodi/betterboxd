@@ -20,7 +20,7 @@ export default function ChatPanel({
   movieTitle,
   sessionId,
   freshKey,
-  onSessionReady,
+  onSettled,
   header,
   placeholder = "和影迷助手聊聊…",
   hint,
@@ -31,8 +31,8 @@ export default function ChatPanel({
   sessionId?: string;
   /** 新建会话（Chats 页「新建控制台会话」）：连接 ?fresh=1 */
   freshKey?: string;
-  /** fresh 会话建立后回调真实 session id（用于列表刷新/切换 key） */
-  onSessionReady?: (sessionId: string) => void;
+  /** 一轮流式结束（done/error）后回调（Chats 页刷新列表） */
+  onSettled?: () => void;
   /** 自定义标题行文案（默认 控制台/💬片名） */
   header?: string;
   placeholder?: string;
@@ -45,10 +45,14 @@ export default function ChatPanel({
     chat;
   const [input, setInput] = useState("");
 
-  // fresh 会话建立 → 上报真实 session id
+  // 流结束 → onSettled（ref 防回调身份变化触发 effect）
+  const settledRef = useRef(onSettled);
+  settledRef.current = onSettled;
+  const prevStreaming = useRef(false);
   useEffect(() => {
-    if (freshKey && chat.sessionId) onSessionReady?.(chat.sessionId);
-  }, [freshKey, chat.sessionId, onSessionReady]);
+    if (prevStreaming.current && !streaming) settledRef.current?.();
+    prevStreaming.current = streaming;
+  }, [streaming]);
 
   const send = useCallback(() => {
     const text = input.trim();
