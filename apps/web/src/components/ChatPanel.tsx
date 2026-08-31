@@ -102,6 +102,7 @@ export default function ChatPanel({
       {pendingConfirm && (
         <div className="mt-2">
           <ConfirmCard
+            key={pendingConfirm.call_id}
             pending={pendingConfirm}
             onConfirm={(args) => resolveConfirm("confirm", args)}
             onReject={() => resolveConfirm("reject")}

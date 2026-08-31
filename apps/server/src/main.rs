@@ -39,9 +39,10 @@ struct AppState {
     posters_dir: std::path::PathBuf,
 }
 
-/// 确认卡等待路由：call_id → 回传通道（+关联取消令牌）。
+/// 确认卡等待路由：call_id → 回传通道（+原始请求参数，供前端缺参时回退）。
 struct PendingRoute {
     tx: tokio::sync::oneshot::Sender<Result<Option<serde_json::Value>, String>>,
+    args: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -136,10 +137,10 @@ impl betterboxd_core::tools::ConfirmGate for WsGate {
             "args": pending_req.args,
         });
         let (otx, orx) = tokio::sync::oneshot::channel();
-        self.pending
-            .lock()
-            .unwrap()
-            .insert(call_id.clone(), PendingRoute { tx: otx });
+        self.pending.lock().unwrap().insert(
+            call_id.clone(),
+            PendingRoute { tx: otx, args: pending_req.args.clone() },
+        );
         let _ = self.tx.send(Message::Text(frame.to_string().into()));
 
         Box::pin(async move {
@@ -517,75 +518,88 @@ async fn usage_summary(State(app): State<App>) -> Response {
         .into_response()
 }
 
-/// 直译管线：自然语言 → LLM 生成 SQL → 审查 → 执行 → 图表。
-/// 仪表盘"新建查询"与控制台 `/stats` 共用此端点。
+/// 统计执行（Stats 页重跑）：{saved_query_id} 直跑并刷新 last_run_at，
+/// 或 {sql, chart} 直接执行。SQL 审查 + 强制 1000 行上限。
+/// 统计项目的创建/发现走控制台对话（run_stats / manage_saved_queries 工具）。
 async fn stats_run(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
-    let Some(nl) = args["nl"].as_str() else {
-        return (StatusCode::BAD_REQUEST, "缺少 nl（自然语言需求）").into_response();
-    };
-    let client = match &app.client {
-        Some(c) => c.clone(),
-        None => return (StatusCode::BAD_REQUEST, "未配置模型档案").into_response(),
-    };
-    let schema = betterboxd_core::agent::SCHEMA_DICTIONARY;
-    let prompt = format!(
-        "你是统计查询生成器。根据用户的自然语言需求，生成一条 SQLite SELECT 语句。\n\
-         只返回 JSON: {{\"sql\": \"...\", \"chart\": {{\"type\": \"bar|line|pie|table\", \"title\": \"...\"}}}}\n\
-         {schema}\n\
-         用户需求: {nl}"
-    );
-    let messages = vec![serde_json::json!({"role": "user", "content": prompt})];
-
-    // 重试 ≤2 次
-    let mut last_err = String::new();
-    for _ in 0..3 {
-        let token = CancellationToken::new();
-        let outcome = client
-            .chat_stream(&messages, None, None, &token, |_| {})
-            .await;
-        let Ok(outcome) = outcome else {
-            last_err = "LLM 调用失败".into();
-            continue;
+    // saved_query_id 优先
+    if let Some(id) = args["saved_query_id"].as_str().map(String::from) {
+        let id_query = id.clone();
+        let payload: Option<String> = app
+            .db
+            .call(move |c| {
+                Ok(c.query_row(
+                    "SELECT payload_json FROM saved_queries WHERE id=?1",
+                    rusqlite::params![id_query],
+                    |r| r.get(0),
+                )
+                .ok())
+            })
+            .await
+            .unwrap_or(None);
+        let Some(payload) = payload else {
+            return (StatusCode::NOT_FOUND, "统计项目不存在").into_response();
         };
-        // 从回复中提取 JSON（可能被 markdown 代码块包裹）
-        let raw = outcome.text.trim();
-        let json_str = raw
-            .strip_prefix("```json").and_then(|s| s.strip_suffix("```"))
-            .or_else(|| raw.strip_prefix("```").and_then(|s| s.strip_suffix("```")))
-            .unwrap_or(raw)
-            .trim();
-        let parsed: Result<Value, _> = serde_json::from_str(json_str);
-        let Ok(query) = parsed else {
-            last_err = "LLM 回复不是有效 JSON".into();
-            continue;
+        let p: Result<Value, _> = serde_json::from_str(&payload);
+        let Ok(p) = p else {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "payload 损坏").into_response();
         };
-        let sql = query["sql"].as_str().unwrap_or_default().to_string();
-        let chart = query.get("chart").cloned().unwrap_or(json!({"type": "table"}));
-
-        match betterboxd_core::stats_guard::review_sql(&sql) {
-            Err(e) => { last_err = format!("SQL 审查未通过: {e}"); continue; }
-            Ok(()) => {
-                let sql_exec = if !sql.to_lowercase().contains("limit") {
-                    format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'))
-                } else {
-                    sql.trim_end_matches(';').to_string()
-                };
-                match app.db.select_json(&sql_exec).await {
-                    Ok(rows) => {
-                        return Json(json!({
-                            "ok": true, "sql": sql, "chart": chart,
-                            "columns": rows.first().map(|r| {
-                                r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()
-                            }).unwrap_or_default(),
-                            "rows": rows, "truncated": rows.len() >= 1000,
-                        })).into_response();
-                    }
-                    Err(e) => { last_err = format!("SQL 执行失败: {e}"); continue; }
-                }
-            }
+        let sql = p["sql"].as_str().unwrap_or_default().to_string();
+        let chart = p.get("chart").cloned().unwrap_or(json!({"type": "table"}));
+        if let Err(e) = betterboxd_core::stats_guard::review_sql(&sql) {
+            return (StatusCode::BAD_REQUEST, format!("SQL 审查未通过: {e}")).into_response();
         }
+        let sql_exec = format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'));
+        return match app.db.select_json(&sql_exec).await {
+            Ok(rows) => {
+                let _ = app
+                    .db
+                    .call(move |c| {
+                        c.execute(
+                            "UPDATE saved_queries SET last_run_at=?1 WHERE id=?2",
+                            rusqlite::params![betterboxd_core::now(), id],
+                        )
+                    })
+                    .await;
+                Json(json!({
+                    "ok": true, "sql": sql, "chart": chart,
+                    "columns": rows.first().map(|r| {
+                        r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()
+                    }).unwrap_or_default(),
+                    "rows": rows, "truncated": rows.len() >= 1000,
+                }))
+                .into_response()
+            }
+            Err(e) => (StatusCode::BAD_REQUEST, format!("SQL 执行失败: {e}")).into_response(),
+        };
     }
-    (StatusCode::BAD_REQUEST, format!("直译管线 3 次尝试均失败: {last_err}")).into_response()
+    // 直接执行 SQL（Stats 页备用）
+    let Some(sql) = args["sql"].as_str().map(String::from) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "缺少 saved_query_id 或 sql（统计项目请在控制台对话创建）",
+        )
+            .into_response();
+    };
+    let chart = args
+        .get("chart")
+        .cloned()
+        .unwrap_or(json!({"type": "table"}));
+    if let Err(e) = betterboxd_core::stats_guard::review_sql(&sql) {
+        return (StatusCode::BAD_REQUEST, format!("SQL 审查未通过: {e}")).into_response();
+    }
+    let sql_exec = format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'));
+    match app.db.select_json(&sql_exec).await {
+        Ok(rows) => Json(json!({
+            "ok": true, "sql": sql, "chart": chart,
+            "columns": rows.first().map(|r| {
+                r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()
+            }).unwrap_or_default(),
+            "rows": rows, "truncated": rows.len() >= 1000,
+        }))
+        .into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, format!("SQL 执行失败: {e}")).into_response(),
+    }
 }
 
 async fn saved_queries_list(State(app): State<App>) -> Response {
@@ -671,10 +685,8 @@ fn llm_to_ui_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> 
                         }
                     }
                 }
-                if let Some(t) = m["content"].as_str() {
-                    if !t.is_empty() {
-                        ui.push(json!({"role": "assistant", "text": t}));
-                    }
+                if let Some(t) = m["content"].as_str().filter(|t| !t.is_empty()) {
+                    ui.push(json!({"role": "assistant", "text": t}));
                 }
             }
             "tool" => {
@@ -1096,6 +1108,7 @@ async fn main() {
 }
 
 /// 把前端确认结果路由到等待中的确认门。
+/// 前端确认卡可编辑参数：frame.args 为对象时用之，缺失/非对象时回退原请求参数。
 fn route_confirm(app: &App, frame: &serde_json::Value) {
     let Some(call_id) = frame["call_id"].as_str() else {
         return;
@@ -1104,7 +1117,8 @@ fn route_confirm(app: &App, frame: &serde_json::Value) {
     let pending = app.pending.lock().unwrap().remove(call_id);
     if let Some(route) = pending {
         let payload = if decision == "confirm" {
-            Ok(Some(frame["args"].clone()))
+            let edited = frame["args"].as_object().map(|_| frame["args"].clone());
+            Ok(Some(edited.unwrap_or_else(|| route.args.clone())))
         } else {
             Ok(None)
         };

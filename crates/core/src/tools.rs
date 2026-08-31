@@ -100,12 +100,12 @@ pub fn registry() -> ToolRegistry {
             },
             ToolMeta {
                 name: "run_stats",
-                description: "执行统计查询。传入 {sql, chart}（单条只读 SELECT，仅限 v_* 视图面，建议带 LIMIT）或 {saved_query_id}。返回 {columns, rows, truncated}。",
+                description: "执行统计查询。优先传 saved_query_id 复用已有统计项目；否则传 {sql, chart}（单条只读 SELECT，仅限 v_* 视图面，带 LIMIT，列用中文 AS 别名且标签列在前）。拿到结果后用自然语言+图标解读，禁止裸贴数据。",
                 parameters: obj_schema(
                     json!({
                         "sql": {"type": "string"},
                         "chart": {"type": "object", "description": "{type: bar|line|pie|table, title: string}"},
-                        "saved_query_id": {"type": "string"}
+                        "saved_query_id": {"type": "string", "description": "已保存统计项目的 id（list_saved_queries 获取）"}
                     }),
                     &[],
                 ),
@@ -122,8 +122,22 @@ pub fn registry() -> ToolRegistry {
             },
             ToolMeta {
                 name: "list_saved_queries",
-                description: "列出已收藏的统计查询（可在 run_stats 用 saved_query_id 直跑）。",
+                description: "列出已保存的统计项目（id/名称/SQL/最近运行时间）。统计前先查这里，命中同类项目直接用 run_stats 的 saved_query_id 复跑。",
                 parameters: obj_schema(json!({}), &[]),
+            },
+            ToolMeta {
+                name: "manage_saved_queries",
+                description: "保存/删除/重命名统计项目（只落库不执行；执行用 run_stats）。create 需 name+sql（SQL 会先过审查：单条只读 SELECT，仅限 v_* 视图面）；delete/rename 需 saved_query_id。保存操作会弹确认卡向用户展示名称与 SQL。",
+                parameters: obj_schema(
+                    json!({
+                        "action": {"type": "string", "enum": ["create", "delete", "rename"]},
+                        "saved_query_id": {"type": "string"},
+                        "name": {"type": "string"},
+                        "sql": {"type": "string"},
+                        "chart": {"type": "object"}
+                    }),
+                    &["action"],
+                ),
             },
             ToolMeta {
                 name: "manage_diary",
@@ -190,6 +204,7 @@ pub async fn execute(name: &str, ctx: &ToolCtx, args: Value) -> Result<Value, St
         "get_profile_snapshot" => get_profile_snapshot(ctx).await,
         "lookup_lists" => lookup_lists(ctx).await,
         "list_saved_queries" => list_saved_queries(ctx).await,
+        "manage_saved_queries" => manage_saved_queries(ctx, &args).await,
         "manage_diary" => manage_diary(ctx, &args).await,
         "manage_reviews" => manage_reviews(ctx, &args).await,
         "set_movie_state" => set_movie_state(ctx, &args).await,
@@ -311,18 +326,23 @@ async fn get_movie_logs(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
 }
 
 async fn run_stats(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
-    let (sql, chart) = if let Some(id) = get_i64(args, "saved_query_id") {
+    // saved_query_id 是 uuid 字符串；容忍模型误传整数
+    let saved_id: Option<String> = get_str(args, "saved_query_id")
+        .map(String::from)
+        .or_else(|| get_i64(args, "saved_query_id").map(|i| i.to_string()));
+    let (sql, chart) = if let Some(sid) = &saved_id {
+        let sid2 = sid.clone();
         let payload: String = ctx
             .db
             .call(move |c| {
                 c.query_row(
                     "SELECT payload_json FROM saved_queries WHERE id=?1",
-                    rusqlite::params![id.to_string()],
+                    rusqlite::params![sid2],
                     |r| r.get(0),
                 )
             })
             .await
-            .map_err(|_| format!("saved_query {id} 不存在"))?;
+            .map_err(|_| format!("saved_query {sid} 不存在"))?;
         let p: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
         (
             p["sql"].as_str().unwrap_or_default().to_string(),
@@ -342,12 +362,25 @@ async fn run_stats(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
         .select_json(&sql_exec)
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(sid) = &saved_id {
+        let sid2 = sid.clone();
+        let _ = ctx
+            .db
+            .call(move |c| {
+                c.execute(
+                    "UPDATE saved_queries SET last_run_at=?1 WHERE id=?2",
+                    rusqlite::params![crate::now(), sid2],
+                )
+            })
+            .await;
+    }
     let truncated = rows.len() >= 1000;
     Ok(json!({
         "columns": rows.first().map(|r| r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()).unwrap_or_default(),
         "rows": rows,
         "truncated": truncated,
         "chart": chart,
+        "saved_query_id": saved_id.map(|i| json!(i)).unwrap_or(Value::Null),
         "note": if truncated {"结果已截断到 1000 行"} else {""}
     }))
 }
@@ -400,11 +433,92 @@ async fn list_saved_queries(ctx: &ToolCtx) -> Result<Value, String> {
     let rows = ctx
         .db
         .select_json(
-            "SELECT id, name, last_run_at FROM saved_queries ORDER BY sort_order, created_at",
+            "SELECT id, name, payload_json, last_run_at FROM saved_queries ORDER BY sort_order, created_at",
         )
         .await
         .map_err(|e| e.to_string())?;
-    Ok(json!({"saved_queries": rows}))
+    // payload_json 抽出 sql 平铺（AI 按语义匹配复用）
+    let flat: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let p: Value = serde_json::from_str(r["payload_json"].as_str().unwrap_or("{}"))
+                .unwrap_or(json!({}));
+            json!({
+                "id": r["id"], "name": r["name"], "sql": p["sql"],
+                "last_run_at": r["last_run_at"],
+            })
+        })
+        .collect();
+    Ok(json!({"saved_queries": flat}))
+}
+
+/// 统计项目管理（写工具，过确认门；SQL 保存前先过审查）。
+async fn manage_saved_queries(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    let action = get_str(args, "action").ok_or("缺少 action")?;
+    match action {
+        "create" => {
+            let sql = get_str(args, "sql").ok_or("缺少 sql")?.to_string();
+            // 保存前校验：拒绝存进跑不了的查询
+            crate::stats_guard::review_sql(&sql).map_err(|e| format!("SQL 审查未通过: {e}"))?;
+            let args = confirmed_args(ctx, "manage_saved_queries", args.clone()).await?;
+            let name = get_str(&args, "name").ok_or("缺少 name")?.to_string();
+            let sql = get_str(&args, "sql").ok_or("缺少 sql")?.to_string();
+            let chart = args
+                .get("chart")
+                .cloned()
+                .unwrap_or(json!({"type": "table"}));
+            let payload = json!({"sql": sql, "chart": chart}).to_string();
+            let id = uuid::Uuid::now_v7().to_string();
+            let id2 = id.clone();
+            let name2 = name.clone();
+            ctx.db
+                .call(move |c| {
+                    c.execute(
+                        "INSERT INTO saved_queries (id, name, payload_json, sort_order, created_at, last_run_at)
+                         VALUES (?1,?2,?3,0,?4,?4)",
+                        params![id2, name2, payload, crate::now()],
+                    )
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"ok": true, "saved_query_id": id, "name": name}))
+        }
+        "delete" => {
+            let args = confirmed_args(ctx, "manage_saved_queries", args.clone()).await?;
+            let id = get_str(&args, "saved_query_id")
+                .ok_or("缺少 saved_query_id")?
+                .to_string();
+            let n = ctx
+                .db
+                .call(move |c| c.execute("DELETE FROM saved_queries WHERE id=?1", params![id]))
+                .await
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("统计项目不存在".into());
+            }
+            Ok(json!({"ok": true}))
+        }
+        "rename" => {
+            let args = confirmed_args(ctx, "manage_saved_queries", args.clone()).await?;
+            let id = get_str(&args, "saved_query_id")
+                .ok_or("缺少 saved_query_id")?
+                .to_string();
+            let name = get_str(&args, "name").ok_or("缺少 name")?.to_string();
+            let name2 = name.clone();
+            let n = ctx
+                .db
+                .call(move |c| {
+                    c.execute("UPDATE saved_queries SET name=?1 WHERE id=?2", params![name2, id])
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("统计项目不存在".into());
+            }
+            Ok(json!({"ok": true, "name": name}))
+        }
+        _ => Err(format!("未知 action: {action}")),
+    }
 }
 
 // ============ 写工具（M2）：确认门 + Action 账目联动 ============
@@ -431,7 +545,12 @@ pub trait ConfirmGate: Send + Sync {
     ) -> BoxFuture<'a, Result<Option<Value>, String>>;
 }
 
-pub const CONFIRM_TOOLS: &[&str] = &["manage_diary", "manage_reviews", "set_movie_state"];
+pub const CONFIRM_TOOLS: &[&str] = &[
+    "manage_diary",
+    "manage_reviews",
+    "set_movie_state",
+    "manage_saved_queries",
+];
 
 async fn confirmed_args(ctx: &ToolCtx, name: &str, args: Value) -> Result<Value, String> {
     match &ctx.confirm {
