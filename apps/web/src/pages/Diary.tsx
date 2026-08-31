@@ -111,6 +111,11 @@ export default function Diary() {
                   ) : (
                     <p className="text-[#5a6b7c]">（无随记）</p>
                   )}
+                  {r.rating !== null && r.my_rating !== null && r.rating !== r.my_rating && (
+                    <p className="text-xs text-[#5a6b7c]">
+                      当次 {r.rating} · 影片最终评分 {r.my_rating}（双轨评分）
+                    </p>
+                  )}
                   <p className="text-xs text-[#8899aa]">{fmtDims(r) || "无维度标记"}</p>
                   <div className="flex gap-3 text-xs">
                     <button className="text-[#40bcf4]" onClick={() => navigate(`/film/${r.movie_id}`)}>

@@ -47,6 +47,7 @@ export type DiaryRow = {
   title_sub: string;
   watched_date: string;
   rating: number | null;
+  my_rating: number | null;
   liked: number;
   in_theater: number;
   ticket_price_cents: number | null;

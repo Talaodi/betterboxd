@@ -200,6 +200,8 @@ async fn movies_list(
 }
 
 async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Response {
+    // 懒拉取：条目桩首次被访问时补全详情（directors/runtime 等）
+    let _ = betterboxd_core::tools::ensure_movie_details(&app.tmdb, &app.db, id).await;
     let movie = app
         .db
         .select_json(&format!("SELECT * FROM v_movies WHERE tmdb_id={id}"))

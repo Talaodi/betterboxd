@@ -51,16 +51,17 @@ export default function FilmDetail() {
 
   return (
     <div className="pb-10">
-      {/* hero */}
+      {/* hero（海报悬垂到内容区，避免裁切） */}
       <div
-        className="relative h-64 bg-cover bg-center"
+        className="h-56 bg-cover bg-center"
         style={{
-          backgroundImage: `linear-gradient(rgba(20,24,28,0.5), #14181c), url(${posterUrl(m.tmdb_id)})`,
+          backgroundImage: `linear-gradient(rgba(20,24,28,0.45), #14181c), url(${posterUrl(m.tmdb_id)})`,
         }}
-      >
-        <div className="absolute bottom-0 left-0 right-0 flex items-end gap-6 p-6">
-          <Poster tmdbId={m.tmdb_id} title={m.title_main} size="large" />
-          <div className="flex-1 pb-2">
+      />
+      <div className="mx-auto max-w-[1100px] px-6">
+        <div className="-mt-32 flex items-end gap-6 pb-2">
+          <Poster tmdbId={m.tmdb_id} title={m.title_main} size="grid" className="w-[210px] shrink-0 shadow-xl" />
+          <div className="flex-1 pb-3">
             <h1 className="text-2xl font-bold">
               {m.title_main}
               <span className="ml-3 text-base font-normal text-[#8899aa]">{m.title_sub}</span>

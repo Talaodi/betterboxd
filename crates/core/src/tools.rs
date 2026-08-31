@@ -236,66 +236,7 @@ async fn search_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
 
 async fn get_movie_details(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let id = get_i64(args, "movie_id").ok_or("缺少 movie_id")?;
-    // 若详情缺失（条目桩）则懒拉取补全
-    let need_fetch: bool = ctx
-        .db
-        .call(move |c| {
-            Ok(c.query_row(
-                "SELECT COALESCE(fetched_at IS NULL, 1) FROM movies WHERE tmdb_id=?1",
-                rusqlite::params![id],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap_or(1)
-                != 0)
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    if need_fetch {
-        let details = ctx
-            .tmdb
-            .movie_details(id)
-            .await
-            .map_err(|e| e.to_string())?;
-        let directors: Vec<String> = details["credits"]["crew"]
-            .as_array()
-            .map(|crew| {
-                crew.iter()
-                    .filter(|c| c["job"] == "Director")
-                    .filter_map(|c| c["name"].as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let genres: Vec<String> = details["genres"]
-            .as_array()
-            .map(|g| {
-                g.iter()
-                    .filter_map(|g| g["name"].as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let poster_owned = details["poster_path"].as_str().unwrap_or("").to_string();
-        let runtime = details["runtime"].as_i64();
-        ctx.db
-            .call(move |c| {
-                c.execute(
-                    "UPDATE movies SET directors=?2, genres=?3, runtime=COALESCE(?4, runtime),
-                       tagline=COALESCE(json_extract(?5,'$.tagline'), tagline),
-                       overview=COALESCE(json_extract(?5,'$.overview'), overview),
-                       posters=?6, fetched_at=?7 WHERE tmdb_id=?1",
-                    rusqlite::params![
-                        id,
-                        serde_json::to_string(&directors).unwrap(),
-                        serde_json::to_string(&genres).unwrap(),
-                        runtime,
-                        details.to_string(),
-                        serde_json::to_string(&vec![poster_owned]).unwrap(),
-                        crate::now()
-                    ],
-                )
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-    }
+    ensure_movie_details(&ctx.tmdb, &ctx.db, id).await?;
     ctx.db
         .select_json(&format!(
             "SELECT tmdb_id, title_zh, title_en, title_original, release_date,
@@ -1176,4 +1117,64 @@ mod write_regression_tests {
         assert_eq!(actions_before, actions_after, "失败路径不得落账");
         let _ = entry_id;
     }
+}
+
+
+/// 条目桩懒拉取：详情缺失时拉 TMDB details+credits 补全（工具与 REST 共用）。
+pub async fn ensure_movie_details(
+    tmdb: &TmdbClient,
+    db: &DbHandle,
+    movie_id: i64,
+) -> Result<(), String> {
+    let need_fetch: bool = db
+        .call(move |c| {
+            Ok(c.query_row(
+                "SELECT COALESCE(fetched_at IS NULL, 1) FROM movies WHERE tmdb_id=?1",
+                rusqlite::params![movie_id],
+                |r| Ok(r.get::<_, i64>(0)? != 0),
+            )
+            .unwrap_or(true))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    if !need_fetch {
+        return Ok(());
+    }
+    let details = tmdb.movie_details(movie_id).await.map_err(|e| e.to_string())?;
+    let directors: Vec<String> = details["credits"]["crew"]
+        .as_array()
+        .map(|crew| {
+            crew.iter()
+                .filter(|c| c["job"] == "Director")
+                .filter_map(|c| c["name"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let genres: Vec<String> = details["genres"].as_array().map(|g| {
+        g.iter()
+            .filter_map(|g| g["name"].as_str().map(String::from))
+            .collect()
+    }).unwrap_or_default();
+    let poster_owned = details["poster_path"].as_str().unwrap_or("").to_string();
+    let runtime = details["runtime"].as_i64();
+    db.call(move |c| {
+        c.execute(
+            "UPDATE movies SET directors=?2, genres=?3, runtime=COALESCE(?4, runtime),
+               tagline=COALESCE(json_extract(?5,'$.tagline'), tagline),
+               overview=COALESCE(json_extract(?5,'$.overview'), overview),
+               posters=?6, fetched_at=?7 WHERE tmdb_id=?1",
+            rusqlite::params![
+                movie_id,
+                serde_json::to_string(&directors).unwrap(),
+                serde_json::to_string(&genres).unwrap(),
+                runtime,
+                details.to_string(),
+                serde_json::to_string(&vec![poster_owned]).unwrap(),
+                crate::now()
+            ],
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
