@@ -86,9 +86,9 @@ export default function FilmDetail() {
             {m.runtime ? `${m.runtime} mins` : ""}
             {genres.length > 0 && ` · ${genres.join(" / ")}`}
           </p>
-          {m.lb_rating !== null && m.lb_rating !== undefined && (
+          {m.tmdb_rating !== null && m.tmdb_rating !== undefined && (
             <p className="mt-1 text-xs text-[#5a6b7c]">
-              Letterboxd 参考 {m.lb_rating}（{m.lb_votes} 人）
+              TMDB 参考 {m.tmdb_rating}（{m.tmdb_votes} 人评分）· 简介来自 TMDB
             </p>
           )}
         </div>

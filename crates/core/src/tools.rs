@@ -241,7 +241,7 @@ async fn get_movie_details(ctx: &ToolCtx, args: &Value) -> Result<Value, String>
         .select_json(&format!(
             "SELECT tmdb_id, title_zh, title_en, title_original, release_date,
                     runtime, genres, directors, tagline, overview,
-                    lb_rating, lb_votes, my_rating, watched, in_watchlist, liked
+                    tmdb_rating, tmdb_votes, my_rating, watched, in_watchlist, liked
              FROM v_movies WHERE tmdb_id = {id}"
         ))
         .await

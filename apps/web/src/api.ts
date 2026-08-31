@@ -37,8 +37,8 @@ export type MovieRow = {
   genres?: string;
   directors?: string;
   release_date?: string;
-  lb_rating?: number | null;
-  lb_votes?: number | null;
+  tmdb_rating?: number | null;
+  tmdb_votes?: number | null;
 };
 
 export type DiaryRow = {
