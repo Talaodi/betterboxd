@@ -21,7 +21,13 @@ type Frame = {
 
 export type Msg =
   | { role: "user"; text: string }
-  | { role: "assistant"; text: string; usage?: { prompt: number; completion: number } }
+  | {
+      role: "assistant";
+      text: string;
+      usage?: { prompt: number; completion: number };
+      /** false=流式/中间步骤（渲染为进度行），true/undefined=正式回复（气泡+B logo） */
+      final?: boolean;
+    }
   | { role: "tool"; name: string; ok?: boolean };
 
 export type Pending = {
@@ -41,6 +47,8 @@ type Store = {
   sessionId: string;
   /** fresh 重连标记：newChat 后首次重连仍走 fresh=1，hello 后复位 */
   freshPending: boolean;
+  /** 最近一次连接使用的 scope（freshPending 重连时复用） */
+  lastScope?: ChatScope;
   listeners: Set<() => void>;
 };
 
@@ -102,7 +110,7 @@ function handleFrame(s: Store, key: string, f: Frame) {
                   ? ({ role: "tool", name: m.name ?? "tool" } as Msg)
                   : m.role === "user"
                     ? ({ role: "user", text: m.text ?? "" } as Msg)
-                    : ({ role: "assistant", text: m.text ?? "" } as Msg),
+                    : ({ role: "assistant", text: m.text ?? "", final: true } as Msg),
               );
             if (hist.length) {
               s.messages = hist;
@@ -118,6 +126,8 @@ function handleFrame(s: Store, key: string, f: Frame) {
       flushAssistant(s);
       break;
     case "tool":
+      // 关键：跨 agent 步骤清空累积缓冲——否则下一步 token 会把上一步文本再拼一遍
+      s.acc = "";
       s.messages = [...s.messages, { role: "tool", name: f.name ?? "?" }];
       break;
     case "tool_done":
@@ -152,12 +162,12 @@ function handleFrame(s: Store, key: string, f: Frame) {
     }
     case "done":
       s.streaming = false;
-      if (f.tokens) {
+      {
         const last = s.messages[s.messages.length - 1];
         if (last?.role === "assistant") {
           s.messages = [
             ...s.messages.slice(0, -1),
-            { role: "assistant", text: s.acc, usage: f.tokens },
+            { role: "assistant", text: s.acc, usage: f.tokens, final: true },
           ];
         }
       }
@@ -165,7 +175,10 @@ function handleFrame(s: Store, key: string, f: Frame) {
       break;
     case "error":
       s.streaming = false;
-      s.messages = [...s.messages, { role: "assistant", text: `⚠ ${f.message}` }];
+      s.messages = [
+        ...s.messages,
+        { role: "assistant", text: `⚠ ${f.message}`, final: true },
+      ];
       maybeClose(key);
       break;
   }
@@ -174,24 +187,30 @@ function handleFrame(s: Store, key: string, f: Frame) {
 
 function flushAssistant(s: Store) {
   const last = s.messages[s.messages.length - 1];
-  if (last?.role === "assistant") {
-    s.messages = [...s.messages.slice(0, -1), { role: "assistant", text: s.acc }];
-  } else {
-    s.messages = [...s.messages, { role: "assistant", text: s.acc }];
+  if (last?.role === "assistant" && last.final === false) {
+    // 当前步骤的流式消息，就地增长
+    s.messages = [...s.messages.slice(0, -1), { role: "assistant", text: s.acc, final: false }];
+  } else if (last?.role !== "assistant") {
+    // 新步骤：开一条新的流式消息
+    s.messages = [...s.messages, { role: "assistant", text: s.acc, final: false }];
   }
 }
 
 function connect(key: string, scope?: ChatScope) {
   const s = getStore(key);
   if (s.ws && s.ws.readyState <= WebSocket.OPEN) return;
+  s.lastScope = scope;
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  const qs = scope?.freshKey
-    ? "fresh=1"
-    : scope?.sessionId
-      ? `session_id=${scope.sessionId}`
-      : scope?.movieId
-        ? `movie_id=${scope.movieId}`
-        : "";
+  let qs = "";
+  if (scope?.sessionId) {
+    qs = `session_id=${scope.sessionId}`;
+  } else {
+    // movie_id 与 fresh=1 可组合（Chats 页「影片页讨论」新建主题会话）
+    const p: string[] = [];
+    if (scope?.movieId) p.push(`movie_id=${scope.movieId}`);
+    if (scope?.freshKey) p.push("fresh=1");
+    qs = p.join("&");
+  }
   const ws = new WebSocket(`${proto}://${location.host}/ws/chat${qs ? `?${qs}` : ""}`);
   s.ws = ws;
   ws.onopen = () => {
@@ -205,17 +224,17 @@ function connect(key: string, scope?: ChatScope) {
     s.connected = false;
     s.streaming = false;
     notify(s);
-    // 仍有人订阅时断线自动重连（freshPending 时仍走 fresh=1）
+    // 仍有人订阅时断线自动重连
     if ((refCount.get(key) ?? 0) > 0) {
       setTimeout(() => connect(key, scopeForReconnect(key, s)), 1500);
     }
   };
 }
 
-/** 断线重连用的作用域：从 key 反推；freshPending 期间维持 fresh。 */
+/** 断线重连用的作用域：hello 过就直接按 sessionId 恢复；否则从 key 反推。 */
 function scopeForReconnect(key: string, s: Store): ChatScope | undefined {
-  if (s.freshPending) return { freshKey: key };
-  if (key === "global") return undefined;
+  if (s.sessionId) return { sessionId: s.sessionId };
+  if (s.freshPending && s.lastScope) return s.lastScope; // fresh 建连阶段重试
   const [kind, ...rest] = key.split(":");
   const id = rest.join(":");
   if (kind === "movie") return { movieId: Number(id) };
@@ -272,21 +291,6 @@ export function useChat(scope?: ChatScope) {
     notify(s);
   }, [key]);
 
-  /** 开新会话：断开旧连接、清空消息，以 fresh=1 重连（仅 global 用）。 */
-  const newChat = useCallback(() => {
-    const s = getStore(key);
-    s.ws?.close();
-    s.ws = null;
-    s.messages = [];
-    s.acc = "";
-    s.streaming = false;
-    s.pendingConfirm = null;
-    s.sessionId = "";
-    notify(s);
-    s.freshPending = true;
-    connect(key, { freshKey: "global-new" });
-  }, [key]);
-
   const resolveConfirm = useCallback(
     (decision: "confirm" | "reject", args?: Record<string, unknown>) => {
       const s = getStore(key);
@@ -315,6 +319,5 @@ export function useChat(scope?: ChatScope) {
     sendUser,
     interrupt,
     resolveConfirm,
-    newChat,
   };
 }

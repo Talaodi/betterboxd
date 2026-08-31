@@ -1,8 +1,9 @@
 /** Chats 页：左侧会话列表（全部记录/同主题记录 + 新建控制台会话），
- *  右侧打开对应 Session（与控制台同款 ChatPanel，可续聊）。 */
+ *  右侧打开对应 Session（与控制台同款 ChatPanel，可续聊/删除）。
+ *  影片页「💬 讨论」→ /chats?new_movie=<id>：新建该影片主题会话并切至同主题 Tab。 */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { getJson } from "../api";
+import { getJson, sendJson } from "../api";
 import ChatPanel from "../components/ChatPanel";
 import ChatListRow from "../components/ChatListRow";
 
@@ -17,11 +18,16 @@ type ChatRow = {
   tmdb_id: number | null;
 };
 
+type PendingNew = {
+  key: number;
+  movieId?: number;
+  movieTitle?: string | null;
+};
+
 export default function Chats() {
   const [chats, setChats] = useState<ChatRow[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  /** >0 → 新建流程激活（值为 freshKey 种子）；面板保持挂载直到首次落盘 */
-  const [pendingNew, setPendingNew] = useState(0);
+  const [pendingNew, setPendingNew] = useState<PendingNew | null>(null);
   const [tab, setTab] = useState<"all" | "topic">("all");
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -32,26 +38,59 @@ export default function Chats() {
   }, []);
   useEffect(loadChats, [loadChats]);
 
-  // URL ?open=<id>：从影片 Log 聊卡等入口直达指定会话
+  // URL 入口：?open=<id> 直达会话；?new_movie=<id> 新建影片主题会话
   useEffect(() => {
     const o = searchParams.get("open");
+    const nm = searchParams.get("new_movie");
     if (o) {
       setOpenId(o);
-      setPendingNew(0);
+      setPendingNew(null);
       setSearchParams({}, { replace: true });
+    } else if (nm && /^\d+$/.test(nm)) {
+      const mid = Number(nm);
+      setTab("topic");
+      setOpenId(null);
+      setPendingNew({ key: Date.now(), movieId: mid });
+      setSearchParams({}, { replace: true });
+      // 拉片名做面板标题
+      getJson<{ movie: { title_main?: string } }>(`/api/movie/${mid}`)
+        .then((d) => {
+          const t = d.movie?.title_main ?? null;
+          setPendingNew((p) => (p && p.movieId === mid ? { ...p, movieTitle: t } : p));
+        })
+        .catch(() => {});
     }
   }, [searchParams, setSearchParams]);
 
   const open = chats?.find((c) => c.id === openId) ?? null;
 
-  // 同主题记录：与当前打开会话同主题（同一部影片，或都是控制台）
+  // 同主题记录锚点：打开的会话，或新建中的会话主题
+  const anchor: { scope: string; movie_id: number | null } | null =
+    open
+      ? { scope: open.scope, movie_id: open.movie_id }
+      : pendingNew
+        ? { scope: pendingNew.movieId ? "movie" : "global", movie_id: pendingNew.movieId ?? null }
+        : null;
+
   const listed = (chats ?? []).filter((c) => {
     if (tab === "all") return true;
-    if (!open) return true;
-    return open.scope === "movie"
-      ? c.scope === "movie" && c.movie_id === open.movie_id
-      : c.scope === open.scope;
+    if (!anchor) return true;
+    return anchor.scope === "movie"
+      ? c.scope === "movie" && c.movie_id === anchor.movie_id
+      : c.scope === anchor.scope;
   });
+
+  const delOpen = async () => {
+    if (!open) return;
+    if (!window.confirm(`删除会话「${open.title || "（无标题）"}」？此操作不可撤销。`)) return;
+    try {
+      await sendJson(`/api/chats/${open.id}`, "DELETE");
+      setOpenId(null);
+      loadChats();
+    } catch (e) {
+      alert(`删除失败: ${(e as Error).message}`);
+    }
+  };
 
   return (
     <div className="flex h-full min-h-0">
@@ -75,7 +114,7 @@ export default function Chats() {
           <button
             className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
             title="新建控制台会话"
-            onClick={() => { setPendingNew(Date.now()); setOpenId(null); setTab("all"); }}
+            onClick={() => { setPendingNew({ key: Date.now() }); setOpenId(null); setTab("topic"); }}
           >
             + 新建
           </button>
@@ -96,7 +135,7 @@ export default function Chats() {
               tmdbId={c.tmdb_id}
               movieTitle={c.movie_title}
               selected={openId === c.id && !pendingNew}
-              onClick={() => { setOpenId(c.id); setPendingNew(0); }}
+              onClick={() => { setOpenId(c.id); setPendingNew(null); }}
             />
           ))}
         </div>
@@ -107,11 +146,27 @@ export default function Chats() {
         <div className="mx-auto flex h-full max-w-[760px] flex-col px-6 pt-6 pb-4">
           {pendingNew ? (
             <ChatPanel
-              key={`new-${pendingNew}`}
-              freshKey={`new-${pendingNew}`}
-              header="控制台 · 新会话"
-              /* 新会话首次落盘发生在第一轮流结束；列表届时刷新 */
-              onSettled={loadChats}
+              key={`new-${pendingNew.key}`}
+              freshKey={`new-${pendingNew.key}`}
+              movieId={pendingNew.movieId}
+              header={
+                pendingNew.movieId
+                  ? `💬 ${pendingNew.movieTitle ?? "影片"} · 新会话`
+                  : "控制台 · 新会话"
+              }
+              hint={
+                pendingNew.movieTitle
+                  ? `和影迷助手聊聊《${pendingNew.movieTitle}》——它了解这部片和你的观影记录。`
+                  : undefined
+              }
+              onSettled={(sid) => {
+                // 首轮流结束：会话已落盘 → 切回 open 模式（可删除/高亮），刷新列表
+                if (sid) {
+                  setPendingNew(null);
+                  setOpenId(sid);
+                }
+                loadChats();
+              }}
             />
           ) : open ? (
             <ChatPanel
@@ -124,11 +179,12 @@ export default function Chats() {
                   : undefined
               }
               onSettled={loadChats}
+              onDelete={delOpen}
             />
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
               <p className="text-sm text-[#5a6b7c]">
-                从左侧选择一个会话，或点「+ 新建」开始一段新的控制台对话。
+                从左侧选择一个会话，或点「+ 新建」开始一段新的对话。
               </p>
               <Link to="/films" className="text-xs text-[#40bcf4] hover:underline">
                 去 Films 找部片聊 →

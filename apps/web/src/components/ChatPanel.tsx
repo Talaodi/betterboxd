@@ -21,6 +21,7 @@ export default function ChatPanel({
   sessionId,
   freshKey,
   onSettled,
+  onDelete,
   header,
   placeholder = "和影迷助手聊聊…",
   hint,
@@ -31,26 +32,30 @@ export default function ChatPanel({
   sessionId?: string;
   /** 新建会话（Chats 页「新建控制台会话」）：连接 ?fresh=1 */
   freshKey?: string;
-  /** 一轮流式结束（done/error）后回调（Chats 页刷新列表） */
-  onSettled?: () => void;
+  /** 一轮流式结束（done/error）后回调（携带当前会话 id；Chats 页刷新列表/切换 open 模式） */
+  onSettled?: (sessionId: string) => void;
+  /** 删除当前会话（Chats 页标题行渲染删除按钮） */
+  onDelete?: () => void;
   /** 自定义标题行文案（默认 控制台/💬片名） */
   header?: string;
   placeholder?: string;
   hint?: string;
 }) {
   const chat = useChat(
-    freshKey ? { freshKey } : sessionId ? { sessionId } : movieId ? { movieId } : undefined,
+    movieId || sessionId || freshKey ? { movieId, sessionId, freshKey } : undefined,
   );
-  const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm, newChat } =
+  const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm } =
     chat;
   const [input, setInput] = useState("");
 
   // 流结束 → onSettled（ref 防回调身份变化触发 effect）
   const settledRef = useRef(onSettled);
   settledRef.current = onSettled;
+  const sidRef = useRef("");
+  sidRef.current = chat.sessionId;
   const prevStreaming = useRef(false);
   useEffect(() => {
-    if (prevStreaming.current && !streaming) settledRef.current?.();
+    if (prevStreaming.current && !streaming) settledRef.current?.(sidRef.current);
     prevStreaming.current = streaming;
   }, [streaming]);
 
@@ -74,13 +79,13 @@ export default function ChatPanel({
           {header ?? (movieTitle ? `💬 ${movieTitle}` : "控制台")}
         </span>
         <span className="flex items-baseline gap-3">
-          {!movieId && !sessionId && !freshKey && (
+          {onDelete && (
             <button
-              className="text-xs text-[#5a6b7c] hover:text-[#40bcf4] disabled:opacity-40"
-              onClick={newChat}
-              disabled={streaming}
+              className="text-xs text-[#5a6b7c] hover:text-[#ff8000]"
+              onClick={onDelete}
+              title="删除此会话"
             >
-              新对话
+              🗑 删除
             </button>
           )}
           <span className={"text-xs " + (connected ? "text-[#00e054]" : "text-[#ff8000]")}>
@@ -93,16 +98,32 @@ export default function ChatPanel({
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg border border-[#33414f] bg-[#1b222b] p-4">
         {messages.length === 0 && (
           <p className="text-sm text-[#5a6b7c]">
-            {hint ?? '和影迷助手聊聊："帮我搜一下盗梦空间"、"今年我看了多少电影"、"记一下：刚看了XXX，X分"。'}
+            {hint ?? '对助手说点什么："帮我搜一下盗梦空间"、"今年我看了多少电影"、"记一下：刚看了XXX，X分"。'}
           </p>
         )}
-        {messages.map((m, i) =>
-          m.role === "tool" ? (
-            <div key={i} className="flex items-center gap-2 pl-10 text-xs text-[#5a6b7c]">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[#00e054] text-[10px] font-bold text-[#0c1a10]">B</span>
-              🔧 {m.name} {m.ok === false ? "✗" : m.ok ? "✓" : "…"}
-            </div>
-          ) : (
+        {messages.map((m, i) => {
+          // 工具调用进度行（无 B logo）
+          if (m.role === "tool") {
+            return (
+              <div key={i} className="pl-10 text-xs text-[#5a6b7c]">
+                calling {m.name} {m.ok === false ? "✗" : m.ok ? "✓" : "…"}
+              </div>
+            );
+          }
+          // 中间步骤（流式/未定稿）→ 进度行：Thinking…
+          if (m.role === "assistant" && m.final === false) {
+            const isLast = i === messages.length - 1;
+            const t = m.text.trim();
+            return (
+              <div
+                key={i}
+                className={"pl-10 text-xs text-[#5a6b7c]" + (isLast && streaming ? " animate-pulse" : "")}
+              >
+                ✱ {t ? (t.length > 120 ? t.slice(0, 120) + "…" : t) : "Thinking…"}
+              </div>
+            );
+          }
+          return (
             <div key={i} className={"flex " + (m.role === "user" ? "justify-end" : "items-start gap-2")}>
               {m.role === "assistant" && (
                 <span className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00e054] text-[11px] font-bold text-[#0c1a10]">B</span>
@@ -125,8 +146,8 @@ export default function ChatPanel({
                 )}
               </span>
             </div>
-          ),
-        )}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 

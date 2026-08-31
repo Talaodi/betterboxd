@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
-import ChatPanel from "../components/ChatPanel";
 import DiaryEntryRow from "../components/DiaryEntryRow";
 import ReviewPosterCard from "../components/ReviewPosterCard";
 import ChatListRow from "../components/ChatListRow";
@@ -21,7 +20,6 @@ export default function FilmDetail() {
   const [tab, setTab] = useState("all");
   const [showDiary, setShowDiary] = useState(false);
   const [showReview, setShowReview] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
 
   const load = () => {
     getJson<Detail>(`/api/movie/${id}`)
@@ -152,7 +150,7 @@ export default function FilmDetail() {
             </button>
             <button
               className="block w-full rounded border border-[#456] px-3 py-1.5 text-center text-sm text-[#8899aa] hover:text-white"
-              onClick={() => setChatOpen(true)}
+              onClick={() => navigate(`/chats?new_movie=${m.tmdb_id}`)}
             >
               💬 讨论
             </button>
@@ -247,21 +245,6 @@ export default function FilmDetail() {
           ))}
         </div>
       </div>
-      {chatOpen && (
-        <div className="fixed inset-y-0 right-0 z-40 flex w-[420px] flex-col border-l border-[#33414f] bg-[#14181c] p-4">
-          <div className="mb-2 flex justify-end">
-            <button className="text-[#5a6b7c] hover:text-white" onClick={() => setChatOpen(false)}>✕</button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <ChatPanel
-              movieId={m.tmdb_id}
-              movieTitle={m.title_main}
-              placeholder={`聊聊《${m.title_main}》…`}
-              hint={`和影迷助手聊聊《${m.title_main}》——它了解这部片和你的观影记录。`}
-            />
-          </div>
-        </div>
-      )}
       {showDiary && <DiaryModal movieId={m.tmdb_id} onClose={() => { setShowDiary(false); load(); }} onSaved={() => { setShowDiary(false); load(); }} />}
       {showReview && <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />}
     </div>

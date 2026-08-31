@@ -710,6 +710,29 @@ async fn chats_list(State(app): State<App>) -> Response {
     }
 }
 
+/// 删除会话：索引行 + JSON 落盘文件一并移除（Log 流中的聊记录随之消失）。
+async fn chat_delete(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return (StatusCode::BAD_REQUEST, "非法会话 ID").into_response();
+    }
+    let id_db = id.clone();
+    let n = app
+        .db
+        .call(move |c| {
+            c.execute("DELETE FROM chat_sessions WHERE id=?1", rusqlite::params![id_db])
+        })
+        .await
+        .unwrap_or(0);
+    let _ = std::fs::remove_file(
+        data_dir_path().join(format!(".betterboxd/sessions/{id}.json")),
+    );
+    if n > 0 {
+        Json(json!({"ok": true})).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "会话不存在").into_response()
+    }
+}
+
 /// LLM 消息数组 → UI 消息数组（还原工具名，丢弃空 assistant 与工具载荷）。
 fn llm_to_ui_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let mut call_names: std::collections::HashMap<String, String> = Default::default();
@@ -1156,7 +1179,7 @@ async fn main() {
         .route("/api/saved-queries", get(saved_queries_list).post(saved_query_create))
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
         .route("/api/chats", get(chats_list))
-        .route("/api/chats/{id}", get(chat_detail))
+        .route("/api/chats/{id}", get(chat_detail).delete(chat_delete))
         .route("/api/lists", get(lists_list))
         .route("/api/lists/{id}", get(list_detail))
         .route("/api/config", get(config_get).post(config_save))

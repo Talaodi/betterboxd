@@ -1,25 +1,38 @@
-import { useState } from "react";
-function StarGlyphs({ value }: { value: number }) {
-  // 逐星渲染：每颗星独立判断填充（0/半/满），不依赖容器宽度裁切
+import { useId, useState } from "react";
+
+/** 五角星路径（24×24 viewBox） */
+const STAR_D =
+  "M12 2.4l2.92 5.92 6.53.95-4.72 4.6 1.11 6.5L12 17.35l-5.84 3.02 1.11-6.5-4.72-4.6 6.53-.95L12 2.4z";
+
+/** 单颗星：灰底 + 绿色按比例裁切（SVG 裁切边缘干净，无字体半切毛刺） */
+function StarSvg({ fill, uid, idx }: { fill: number; uid: string; idx: number }) {
+  const clipId = `${uid}-s${idx}`;
   return (
-    <>
+    <svg width="1em" height="1em" viewBox="0 0 24 24" className="inline-block align-baseline">
+      <path d={STAR_D} fill="#3a4653" />
+      {fill > 0 && (
+        <>
+          <defs>
+            <clipPath id={clipId}>
+              <rect x="0" y="0" width={fill * 24} height="24" />
+            </clipPath>
+          </defs>
+          <path d={STAR_D} fill="#00e054" clipPath={`url(#${clipId})`} />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function StarGlyphs({ value }: { value: number }) {
+  const uid = useId();
+  return (
+    <span className="whitespace-nowrap leading-none">
       {[0, 1, 2, 3, 4].map((i) => {
-        const fill = value - i * 20; // 0..20
-        return (
-          <span key={i} className="relative inline-block w-[1em] text-center">
-            <span className="text-[#3a4653]">★</span>
-            <span
-              className="absolute left-0 top-0 inline-block overflow-hidden text-[#00e054]"
-              style={{
-                width: fill >= 20 ? "100%" : fill >= 10 ? "50%" : "0%",
-              }}
-            >
-              ★
-            </span>
-          </span>
-        );
+        const fill = Math.max(0, Math.min(1, (value - i * 20) / 20));
+        return <StarSvg key={i} fill={fill} uid={uid} idx={i} />;
       })}
-    </>
+    </span>
   );
 }
 
@@ -46,9 +59,9 @@ export function StarsEditor({
   const shown = hover ?? (value === null ? 0 : value);
   const ticks = Array.from({ length: 10 }, (_, i) => (i + 1) * 10); // 10..100
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 text-2xl">
       <div
-        className="relative inline-block cursor-pointer whitespace-nowrap text-2xl"
+        className="relative inline-block cursor-pointer"
         onMouseLeave={() => setHover(null)}
       >
         <StarGlyphs value={shown} />
