@@ -49,11 +49,6 @@ function storeKey(movieId?: number) {
   return movieId ? `movie:${movieId}` : "global";
 }
 
-function wsUrl(movieId?: number) {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/ws/chat${movieId ? `?movie_id=${movieId}` : ""}`;
-}
-
 function getStore(key: string): Store {
   let s = stores.get(key);
   if (!s) {
@@ -76,9 +71,31 @@ const notify = (s: Store) => s.listeners.forEach((f) => f());
 
 function handleFrame(s: Store, key: string, f: Frame) {
   switch (f.type) {
-    case "hello":
+    case "hello": {
       s.sessionId = f.session_id ?? "";
+      // 历史恢复：内存为空时拉取该会话消息（刷新/重开抽屉后回填）
+      if (s.sessionId && s.messages.length === 0) {
+        fetch(`/api/chats/${s.sessionId}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => {
+            if (!d || s.messages.length > 0 || s.streaming) return;
+            const hist: Msg[] = (d.messages ?? [])
+              .map((m: { role: string; text?: string; name?: string }) =>
+                m.role === "tool"
+                  ? ({ role: "tool", name: m.name ?? "tool" } as Msg)
+                  : m.role === "user"
+                    ? ({ role: "user", text: m.text ?? "" } as Msg)
+                    : ({ role: "assistant", text: m.text ?? "" } as Msg),
+              );
+            if (hist.length) {
+              s.messages = hist;
+              notify(s);
+            }
+          })
+          .catch(() => {});
+      }
       break;
+    }
     case "token":
       s.acc += f.data ?? "";
       flushAssistant(s);
@@ -147,10 +164,12 @@ function flushAssistant(s: Store) {
   }
 }
 
-function connect(key: string, movieId?: number) {
+function connect(key: string, movieId?: number, fresh = false) {
   const s = getStore(key);
   if (s.ws && s.ws.readyState <= WebSocket.OPEN) return;
-  const ws = new WebSocket(wsUrl(movieId));
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const qs = `${movieId ? `movie_id=${movieId}` : ""}${fresh ? `${movieId ? "&" : ""}fresh=1` : ""}`;
+  const ws = new WebSocket(`${proto}://${location.host}/ws/chat${qs ? `?${qs}` : ""}`);
   s.ws = ws;
   ws.onopen = () => {
     s.connected = true;
@@ -158,12 +177,13 @@ function connect(key: string, movieId?: number) {
   };
   ws.onmessage = (ev) => handleFrame(s, key, JSON.parse(ev.data));
   ws.onclose = () => {
+    if (s.ws !== ws) return; // 已被新连接替换（新对话等），旧 socket 事件忽略
+    s.ws = null;
     s.connected = false;
     s.streaming = false;
     notify(s);
     // 仍有人订阅时断线自动重连；movie 作用域无人订阅则不再连
     if ((refCount.get(key) ?? 0) > 0) setTimeout(() => connect(key, movieId), 1500);
-    else s.ws = null;
   };
 }
 
@@ -215,6 +235,20 @@ export function useChat(scope?: { movieId?: number }) {
     notify(s);
   }, [key]);
 
+  /** 开新会话：断开旧连接、清空消息，以 fresh=1 重连（仅 global 用）。 */
+  const newChat = useCallback(() => {
+    const s = getStore(key);
+    s.ws?.close();
+    s.ws = null;
+    s.messages = [];
+    s.acc = "";
+    s.streaming = false;
+    s.pendingConfirm = null;
+    s.sessionId = "";
+    notify(s);
+    connect(key, scope?.movieId, true);
+  }, [key, scope?.movieId]);
+
   const resolveConfirm = useCallback(
     (decision: "confirm" | "reject", args?: Record<string, unknown>) => {
       const s = getStore(key);
@@ -243,5 +277,6 @@ export function useChat(scope?: { movieId?: number }) {
     sendUser,
     interrupt,
     resolveConfirm,
+    newChat,
   };
 }

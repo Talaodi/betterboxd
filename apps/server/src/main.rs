@@ -639,13 +639,69 @@ async fn chats_list(State(app): State<App>) -> Response {
         .select_json(
             "SELECT s.id, s.scope, s.movie_id, s.title, s.created_at, s.last_message_at,
                     m.title_main AS movie_title, m.tmdb_id
-             FROM chat_sessions s LEFT JOIN movies m ON m.tmdb_id = s.movie_id
+             FROM chat_sessions s LEFT JOIN v_movies m ON m.tmdb_id = s.movie_id
              ORDER BY s.last_message_at DESC LIMIT 200",
         )
         .await
     {
         Ok(rows) => Json(json!({"chats": rows})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// LLM 消息数组 → UI 消息数组（还原工具名，丢弃空 assistant 与工具载荷）。
+fn llm_to_ui_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut call_names: std::collections::HashMap<String, String> = Default::default();
+    let mut ui = Vec::new();
+    for m in messages {
+        match m["role"].as_str().unwrap_or("") {
+            "user" => {
+                let t = m["content"].as_str().unwrap_or("");
+                if !t.is_empty() {
+                    ui.push(json!({"role": "user", "text": t}));
+                }
+            }
+            "assistant" => {
+                if let Some(tcs) = m["tool_calls"].as_array() {
+                    for tc in tcs {
+                        if let (Some(id), Some(name)) =
+                            (tc["id"].as_str(), tc["function"]["name"].as_str())
+                        {
+                            call_names.insert(id.to_string(), name.to_string());
+                        }
+                    }
+                }
+                if let Some(t) = m["content"].as_str() {
+                    if !t.is_empty() {
+                        ui.push(json!({"role": "assistant", "text": t}));
+                    }
+                }
+            }
+            "tool" => {
+                if let Some(cid) = m["tool_call_id"].as_str() {
+                    let name = call_names.get(cid).cloned().unwrap_or_else(|| "tool".into());
+                    ui.push(json!({"role": "tool", "name": name}));
+                }
+            }
+            _ => {}
+        }
+    }
+    ui
+}
+
+/// 单个会话的历史消息（前端恢复/查看用）。
+async fn chat_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    // 会话 id 为 uuid，仅允许安全字符
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return (StatusCode::BAD_REQUEST, "非法会话 ID").into_response();
+    }
+    match app.sessions.load(&id) {
+        Some(s) => Json(json!({
+            "session": {"id": s.id, "scope": s.scope, "movie_id": s.movie_id, "title": s.title},
+            "messages": llm_to_ui_messages(&s.messages),
+        }))
+        .into_response(),
+        None => (StatusCode::NOT_FOUND, "会话不存在").into_response(),
     }
 }
 
@@ -666,6 +722,8 @@ async fn tools_execute(State(app): State<App>, Json(args): Json<serde_json::Valu
 #[derive(Deserialize)]
 struct WsChatQuery {
     movie_id: Option<i64>,
+    /// 跳过恢复，强制开新会话（控制台「新对话」按钮）
+    fresh: Option<String>,
 }
 
 async fn ws_chat(
@@ -674,10 +732,11 @@ async fn ws_chat(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let movie_id = q.movie_id;
-    ws.on_upgrade(move |socket| handle_chat(app, socket, movie_id))
+    let fresh = matches!(q.fresh.as_deref(), Some("1") | Some("true"));
+    ws.on_upgrade(move |socket| handle_chat(app, socket, movie_id, fresh))
 }
 
-async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>) {
+async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>, fresh: bool) {
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
@@ -690,10 +749,17 @@ async fn handle_chat(app: App, socket: WebSocket, ws_movie_id: Option<i64>) {
         }
     });
 
-    let mut current = match ws_movie_id {
+    // 会话恢复：同 scope 最近会话续聊（刷新/重开不丢历史）；fresh 或无历史才新建
+    let scope = if ws_movie_id.is_some() { "movie" } else { "global" };
+    let resumed = if fresh {
+        None
+    } else {
+        app.sessions.find_latest(scope, ws_movie_id).await
+    };
+    let mut current = resumed.unwrap_or_else(|| match ws_movie_id {
         Some(mid) => app.sessions.new_session("movie", Some(mid), None, None),
         None => app.sessions.new_session("global", None, None, None),
-    };
+    });
     let hello = serde_json::json!({"type": "hello", "session_id": current.id});
     let _ = tx.send(Message::Text(hello.to_string().into()));
 
@@ -1016,6 +1082,7 @@ async fn main() {
         .route("/api/saved-queries", get(saved_queries_list).post(saved_query_create))
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
         .route("/api/chats", get(chats_list))
+        .route("/api/chats/{id}", get(chat_detail))
         .route("/api/lists", get(lists_list))
         .route("/api/lists/{id}", get(list_detail))
         .route("/api/config", get(config_get).post(config_save))

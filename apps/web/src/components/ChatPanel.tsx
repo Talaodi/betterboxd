@@ -16,7 +16,7 @@ export default function ChatPanel({
   placeholder?: string;
   hint?: string;
 }) {
-  const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm } =
+  const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm, newChat } =
     useChat(movieId ? { movieId } : undefined);
   const [input, setInput] = useState("");
 
@@ -39,8 +39,19 @@ export default function ChatPanel({
         <span className="text-sm font-medium tracking-wide text-[#8899aa]">
           {movieTitle ? `💬 ${movieTitle}` : "控制台"}
         </span>
-        <span className={"text-xs " + (connected ? "text-[#00e054]" : "text-[#ff8000]")}>
-          {connected ? "● 已连接" : "○ 连接中"}
+        <span className="flex items-baseline gap-3">
+          {!movieId && (
+            <button
+              className="text-xs text-[#5a6b7c] hover:text-[#40bcf4] disabled:opacity-40"
+              onClick={newChat}
+              disabled={streaming}
+            >
+              新对话
+            </button>
+          )}
+          <span className={"text-xs " + (connected ? "text-[#00e054]" : "text-[#ff8000]")}>
+            {connected ? "● 已连接" : "○ 连接中"}
+          </span>
         </span>
       </div>
 

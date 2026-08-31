@@ -61,6 +61,29 @@ impl SessionStore {
         })
     }
 
+    /// 找某 scope（+可选 movie）最近的一个会话并加载（WS 断线/刷新后恢复）。
+    pub async fn find_latest(&self, scope: &str, movie_id: Option<i64>) -> Option<ChatSession> {
+        let (scope, movie_id) = (scope.to_string(), movie_id);
+        let id: Option<String> = self
+            .db
+            .call(move |c| {
+                Ok(
+                    c.query_row(
+                        "SELECT id FROM chat_sessions
+                         WHERE scope=?1 AND movie_id IS ?2
+                         ORDER BY last_message_at DESC LIMIT 1",
+                        rusqlite::params![scope, movie_id],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .ok(),
+                )
+            })
+            .await
+            .ok()
+            .flatten();
+        self.load(&id?)
+    }
+
     /// 保存 JSON + 同步索引行（Log 流 join 依赖此行）。
     pub async fn save(&self, s: &ChatSession) -> Result<(), String> {
         let v = json!({
