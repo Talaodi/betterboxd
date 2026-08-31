@@ -40,7 +40,8 @@ pub struct RunSummary {
     pub aborted_reason: Option<String>,
 }
 
-fn month_start() -> i64 {
+/// 本月起始 unix 秒（预算/用量汇总共用）。
+pub fn month_start_pub() -> i64 {
     use chrono::TimeZone;
     let now = chrono::Utc::now();
     chrono::Utc
@@ -55,7 +56,7 @@ use chrono::Datelike;
 pub async fn budget_check(db: &DbHandle, config: &Config) -> Result<(), String> {
     let fx = config.billing.fx_rates.clone();
     let cur = config.billing.display_currency.clone();
-    let ms = month_start();
+    let ms = month_start_pub();
     let rows = db
         .select_json(
             "SELECT input_cost, output_cost, currency, at FROM usage_records

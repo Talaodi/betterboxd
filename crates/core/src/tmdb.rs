@@ -115,3 +115,23 @@ pub fn urlencode(s: &str) -> String {
     }
     out
 }
+
+impl TmdbClient {
+    /// 下载海报原图（w500 档），返回字节（由调用方落盘 posters/）。
+    pub async fn download_poster(&self, poster_path: &str) -> Result<Vec<u8>, String> {
+        let url = format!("https://image.tmdb.org/t/p/w500{poster_path}");
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("海报下载失败: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("海报下载 HTTP {}", resp.status()));
+        }
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| e.to_string())
+    }
+}

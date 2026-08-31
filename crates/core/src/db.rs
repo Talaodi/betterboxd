@@ -275,8 +275,49 @@ SELECT c.key AS canon_key, c.name AS canon_name, c.edition,
 FROM canons c JOIN canon_films f ON f.canon_key = c.key;
 "#;
 
+/// M002：v_diary_full 补充影片显示列（title_main/sub/year）。
+const M002: &str = r#"
+DROP VIEW v_diary_full;
+CREATE VIEW v_diary_full AS
+SELECT e.id                                   AS entry_id,
+       e.movie_id,
+       e.watched_date,
+       e.rating,
+       e.in_theater,
+       e.liked,
+       e.ticket_price_cents,
+       e.private_note,
+       e.created_at,
+       e.updated_at,
+       ROW_NUMBER() OVER (
+           PARTITION BY e.movie_id
+           ORDER BY e.watched_date, e.created_at
+       )                                      AS rewatch_index,
+       m.tmdb_id,
+       m.title_zh, m.title_en, m.title_original,
+       COALESCE(m.title_zh, m.title_original, m.title_en) AS title_main,
+       COALESCE(m.title_original, m.title_en, m.title_zh) AS title_sub,
+       substr(m.release_date, 1, 4)           AS year,
+       m.release_date, m.runtime, m.genres, m.directors,
+       m.my_rating, m.in_watchlist, m.liked   AS movie_liked,
+       m.watched,
+       (SELECT json_group_array(t.name)
+          FROM entry_tags et JOIN tags t ON t.id = et.tag_id
+         WHERE et.entry_id = e.id)            AS tags,
+       (SELECT json_group_array(json_object('dimension', dv.dimension, 'name', dv.name))
+          FROM entry_dimensions ed JOIN dimension_values dv ON dv.id = ed.value_id
+         WHERE ed.entry_id = e.id)            AS dimensions_flat
+FROM diary_entries e
+JOIN movies m ON m.tmdb_id = e.movie_id;
+"#;
+
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
-const MIGRATIONS: &[(i64, &str)] = &[(1, M001)];
+const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002)];
+
+/// 当前最新 schema 版本（测试与启动校验用）。
+pub fn latest_version() -> i64 {
+    MIGRATIONS.last().map(|(v, _)| *v).unwrap_or(0)
+}
 
 /// 顺序应用未执行的迁移（自由函数，供种子/测试复用）。
 pub fn apply_migrations(conn: &Connection) -> Result<(), DbError> {
@@ -385,7 +426,7 @@ mod tests {
         let v: i64 = db
             .with_conn(|c| c.query_row("PRAGMA user_version", [], |r| r.get(0)))
             .unwrap();
-        assert_eq!(v, 1);
+        assert_eq!(v, latest_version());
     }
 
     #[test]

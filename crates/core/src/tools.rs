@@ -982,7 +982,6 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     }
 }
 
-
 async fn set_movie_state(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let args = confirmed_args(ctx, "set_movie_state", args.clone()).await?;
     let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
