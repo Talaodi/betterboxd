@@ -129,33 +129,32 @@ export default function Diary() {
               </div>
               {/* 展开区：随记 + 维度 + 双轨提示 */}
               {isExpanded && (
-                <div className="space-y-3 bg-[#161c23] px-10 py-4 text-sm">
-                  {parseJsonArray(r.dimensions_flat).length > 0 && (
-                    <p className="text-xs text-[#8899aa]">
-                      {parseJsonArray(r.dimensions_flat)
-                        .map((d) => {
+                <div className="ml-[104px] mr-4 border-l-2 border-[#2c3440] py-3 pl-4">
+                  {(() => {
+                    const dims = parseJsonArray(r.dimensions_flat);
+                    return dims.length > 0 ? (
+                      <div className="mb-2.5 flex flex-wrap gap-1.5">
+                        {dims.map((d, di) => {
                           const o = d as { dimension: string; name: string };
-                          return `${o.dimension}:${o.name}`;
-                        })
-                        .join(" · ")}
-                    </p>
-                  )}
+                          return (
+                            <span key={di} className="rounded-full bg-[#2c3440] px-2 py-0.5 text-xs">
+                              <span className="text-[#5a6b7c]">{o.dimension}</span>{" "}
+                              <span className="text-[#c8d2dc]">{o.name}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : null;
+                  })()}
                   {r.private_note ? (
-                    <p className="whitespace-pre-wrap leading-relaxed text-[#dfe7ef]">{r.private_note}</p>
-                  ) : (
-                    <p className="text-[#5a6b7c]">（无随记）</p>
-                  )}
-                  {parseJsonArray(r.dimensions_flat).length > 0 && (
-                    <p className="text-xs text-[#8899aa]">
-                      {parseJsonArray(r.dimensions_flat)
-                        .map((d) => {
-                          const o = d as { dimension: string; name: string };
-                          return `${o.dimension}:${o.name}`;
-                        })
-                        .join(" · ")}
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#c8d2dc]">
+                      {r.private_note}
                     </p>
-                  )}
-                  <button className="text-xs text-[#40bcf4]" onClick={() => navigate(`/film/${r.movie_id}`)}>
+                  ) : null}
+                  <button
+                    className="mt-1.5 text-xs text-[#40bcf4] hover:underline"
+                    onClick={(e) => { e.stopPropagation(); navigate(`/film/${r.movie_id}`); }}
+                  >
                     进影片页 →
                   </button>
                 </div>
