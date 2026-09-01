@@ -8,12 +8,17 @@ pub struct TmdbClient {
     http: reqwest::Client,
     key: String,
     language: String,
+    /// 测试隔离（评审缺陷 6）：false 时所有请求直接报错，不发网络
+    enabled: bool,
     last_request: std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>,
 }
 
 impl TmdbClient {
     pub fn new(key: String, proxy: Option<String>, language: String) -> Self {
-        let mut builder = reqwest::Client::builder();
+        let mut builder = reqwest::Client::builder()
+            // 评审缺陷 6：JSON API 总超时 30s（无 SSE 需求）
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30));
         if let Some(p) = proxy {
             builder = builder.proxy(reqwest::Proxy::all(&p).expect("代理地址无效"));
         }
@@ -21,6 +26,18 @@ impl TmdbClient {
             http: builder.build().expect("HTTP 客户端构建失败"),
             key,
             language,
+            enabled: true,
+            last_request: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// 测试用禁用客户端：任何请求立即 Err。
+    pub fn disabled(language: String) -> Self {
+        Self {
+            http: reqwest::Client::new(),
+            key: String::new(),
+            language,
+            enabled: false,
             last_request: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -43,6 +60,9 @@ impl TmdbClient {
     }
 
     async fn get(&self, path: &str, query: &str) -> Result<Value, String> {
+        if !self.enabled {
+            return Err("TMDB 已禁用（测试模式）".into());
+        }
         self.throttle().await;
         let url = format!(
             "https://api.themoviedb.org/3{path}?api_key={}&language={}&{}",
@@ -101,8 +121,12 @@ impl TmdbClient {
             .await
     }
 
-    /// 指定语言的详情（简介统一英文时用 en-US）。
+    /// 指定语言的详情（简介统一英文时用 en-US）。走 get() 恢复 250ms 限速（评审缺陷 6）。
     pub async fn movie_details_in(&self, tmdb_id: i64, language: &str) -> Result<Value, String> {
+        if !self.enabled {
+            return Err("TMDB 已禁用（测试模式）".into());
+        }
+        self.throttle().await;
         let url = format!(
             "https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={}&language={language}&append_to_response=credits",
             self.key

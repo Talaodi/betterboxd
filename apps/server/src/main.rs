@@ -29,12 +29,15 @@ type App = Arc<AppState>;
 #[derive(Clone)]
 struct AppState {
     db: DbHandle,
+    /// 独立只读统计连接（评审缺陷 5）
+    stats_db: DbHandle,
     sessions: Arc<SessionStore>,
     config: Arc<Mutex<Config>>,
-    client: Option<betterboxd_core::llm::ChatClient>,
+    /// 档案切换后原子重建（评审缺陷 3）：config_save 写入，读侧每轮快照
+    client: Arc<std::sync::RwLock<Option<betterboxd_core::llm::ChatClient>>>,
     tmdb: TmdbClient,
-    profile_name: String,
-    profile_model: String,
+    profile_name: Arc<Mutex<String>>,
+    profile_model: Arc<Mutex<String>>,
     pending: Arc<Mutex<std::collections::HashMap<String, PendingRoute>>>,
     posters_dir: std::path::PathBuf,
 }
@@ -168,9 +171,11 @@ impl betterboxd_core::tools::ConfirmGate for WsGate {
 fn tool_ctx(app: &App) -> ToolCtx {
     ToolCtx {
         db: app.db.clone(),
+        stats_db: Some(app.stats_db.clone()),
         tmdb: app.tmdb.clone(),
         config: (*app.config.lock().unwrap()).clone(),
         confirm: None, // REST = 用户明确意图
+        source: "edit", // GUI/REST = 用户直接操作（审计区分 AI 写入）
     }
 }
 
@@ -294,6 +299,30 @@ async fn movie_state(
     }
 }
 
+/// 单条观影记录（确认卡 update 回填数据源）。
+async fn diary_get(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return (StatusCode::BAD_REQUEST, "非法条目 ID").into_response();
+    }
+    match app
+        .db
+        .select_json_params(
+            "SELECT entry_id, movie_id, title_main, title_sub, watched_date, rating, liked,
+                    in_theater, ticket_price_cents, private_note, rewatch_index, tags, dimensions_flat
+             FROM v_diary_full WHERE entry_id=?1"
+                .into(),
+            vec![betterboxd_core::db::SqlVal::Text(id)],
+        )
+        .await
+    {
+        Ok(rows) => match rows.into_iter().next() {
+            Some(entry) => Json(json!({"entry": entry})).into_response(),
+            None => (StatusCode::NOT_FOUND, "条目不存在").into_response(),
+        },
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 async fn diary_list(
     State(app): State<App>,
     Query(q): Query<std::collections::HashMap<String, String>>,
@@ -302,11 +331,12 @@ async fn diary_list(
         .get("limit")
         .and_then(|s| s.parse::<i64>().ok())
         .unwrap_or(100)
-        .min(500);
+        .clamp(1, 500); // LIMIT -1 = 无限制（缺陷 18）
     let offset = q
         .get("offset")
         .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(0);
     let sql = format!(
         "SELECT entry_id, movie_id, title_main, title_sub, watched_date, rating, liked,
                 in_theater, ticket_price_cents, private_note, rewatch_index, tags, dimensions_flat
@@ -540,25 +570,11 @@ async fn usage_summary(State(app): State<App>) -> Response {
         )
         .await;
     let (month, total, calls) = match rows {
-        Ok(rows) => {
-            let conv = |r: &serde_json::Value| -> f64 {
-                let c = r["input_cost"].as_f64().unwrap_or(0.0)
-                    + r["output_cost"].as_f64().unwrap_or(0.0);
-                let currency = r["currency"].as_str().unwrap_or("");
-                c * if currency == cur {
-                    1.0
-                } else {
-                    fx.get(currency).copied().unwrap_or(0.0)
-                }
-            };
-            let month = rows
-                .iter()
-                .filter(|r| r["at"].as_i64().unwrap_or(0) >= ms)
-                .map(conv)
-                .sum::<f64>();
-            let total = rows.iter().map(conv).sum::<f64>();
-            (month, total, rows.len())
-        }
+        Ok(rows) => (
+            agent::cost_of(&rows, &fx, &cur, Some(ms)),
+            agent::cost_of(&rows, &fx, &cur, None),
+            rows.len(),
+        ),
         Err(_) => (0.0, 0.0, 0),
     };
     Json(json!({"display_currency": cur, "month": month, "total": total, "calls": calls}))
@@ -593,12 +609,8 @@ async fn stats_run(State(app): State<App>, Json(args): Json<serde_json::Value>) 
         };
         let sql = p["sql"].as_str().unwrap_or_default().to_string();
         let chart = p.get("chart").cloned().unwrap_or(json!({"type": "table"}));
-        if let Err(e) = betterboxd_core::stats_guard::review_sql(&sql) {
-            return (StatusCode::BAD_REQUEST, format!("SQL 审查未通过: {e}")).into_response();
-        }
-        let sql_exec = format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'));
-        return match app.db.select_json(&sql_exec).await {
-            Ok(rows) => {
+        return match tools::execute_stats_ro(&app.stats_db, &sql, chart).await {
+            Ok(mut out) => {
                 let _ = app
                     .db
                     .call(move |c| {
@@ -608,16 +620,11 @@ async fn stats_run(State(app): State<App>, Json(args): Json<serde_json::Value>) 
                         )
                     })
                     .await;
-                Json(json!({
-                    "ok": true, "sql": sql, "chart": chart,
-                    "columns": rows.first().map(|r| {
-                        r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()
-                    }).unwrap_or_default(),
-                    "rows": rows, "truncated": rows.len() >= 1000,
-                }))
-                .into_response()
+                out["sql"] = json!(sql);
+                out["ok"] = json!(true);
+                Json(out).into_response()
             }
-            Err(e) => (StatusCode::BAD_REQUEST, format!("SQL 执行失败: {e}")).into_response(),
+            Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
         };
     }
     // 直接执行 SQL（Stats 页备用）
@@ -632,20 +639,13 @@ async fn stats_run(State(app): State<App>, Json(args): Json<serde_json::Value>) 
         .get("chart")
         .cloned()
         .unwrap_or(json!({"type": "table"}));
-    if let Err(e) = betterboxd_core::stats_guard::review_sql(&sql) {
-        return (StatusCode::BAD_REQUEST, format!("SQL 审查未通过: {e}")).into_response();
-    }
-    let sql_exec = format!("SELECT * FROM ({}) LIMIT 1000", sql.trim_end_matches(';'));
-    match app.db.select_json(&sql_exec).await {
-        Ok(rows) => Json(json!({
-            "ok": true, "sql": sql, "chart": chart,
-            "columns": rows.first().map(|r| {
-                r.as_object().unwrap().keys().cloned().collect::<Vec<_>>()
-            }).unwrap_or_default(),
-            "rows": rows, "truncated": rows.len() >= 1000,
-        }))
-        .into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, format!("SQL 执行失败: {e}")).into_response(),
+    match tools::execute_stats_ro(&app.stats_db, &sql, chart).await {
+        Ok(mut out) => {
+            out["sql"] = json!(sql);
+            out["ok"] = json!(true);
+            Json(out).into_response()
+        }
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
     }
 }
 
@@ -658,27 +658,6 @@ async fn saved_queries_list(State(app): State<App>) -> Response {
         .await
     {
         Ok(rows) => Json(json!({"queries": rows})).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
-}
-
-async fn saved_query_create(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
-    let Some(name) = args["name"].as_str().map(String::from) else {
-        return (StatusCode::BAD_REQUEST, "缺少 name").into_response();
-    };
-    let payload = args["payload"].to_string();
-    let id = uuid::Uuid::now_v7().to_string();
-    let id_reply = id.clone();
-    match app.db.call(move |c| {
-        c.execute(
-            "INSERT INTO saved_queries (id, name, payload_json, sort_order, created_at, last_run_at)
-             VALUES (?1,?2,?3,?4,?5,?5)",
-            rusqlite::params![id, name, payload, 0, betterboxd_core::now()],
-        )
-    })
-    .await
-    {
-        Ok(_) => Json(json!({"ok": true, "id": id_reply})).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -910,7 +889,8 @@ async fn handle_chat(
         ctx_parts.join("\n")
     } else { String::new() };
 
-    let Some(client) = app.client.clone() else {
+    let client = app.client.read().unwrap().clone();
+    let Some(client) = client else {
             let _ = tx.send(Message::Text(
                 serde_json::json!({"type": "error",
                     "message": "未配置模型档案，请先在设置页或 config.toml 配置"})
@@ -927,12 +907,14 @@ async fn handle_chat(
         let tx_task = tx.clone();
         let sessions = app.sessions.clone();
         let db = app.db.clone();
+        let stats_db = app.stats_db.clone();
         let pending = app.pending.clone();
-        let pname = app.profile_name.clone();
-        let pmodel = app.profile_model.clone();
+        let pname = app.profile_name.lock().unwrap().clone();
+        let pmodel = app.profile_model.lock().unwrap().clone();
         let mut run_handle = tokio::spawn(async move {
             let ctx = ToolCtx {
                 db: db.clone(),
+                stats_db: Some(stats_db.clone()),
                 tmdb,
                 config: cfg_snapshot.clone(),
                 confirm: Some(std::sync::Arc::new(WsGate {
@@ -940,6 +922,7 @@ async fn handle_chat(
                     pending,
                     cancel: token.clone(),
                 })),
+                source: "agent",
             };
             let tx_ev = tx_task.clone();
             let on_event = move |ev: agent::AgentEvent| {
@@ -1089,10 +1072,12 @@ async fn config_get(State(app): State<App>) -> Response {
 async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json::Value>) -> Response {
     let cfg = app.config.lock().unwrap().clone();
     if let Some(new_profiles) = new_cfg.get_mut("profiles").and_then(|p| p.as_array_mut()) {
-        for (i, np) in new_profiles.iter_mut().enumerate() {
+        // 缺陷 14：掩码 key 按**档案名**回填（下标在重排/插入时会错位）
+        for np in new_profiles.iter_mut() {
             let masked = np.get("api_key").and_then(|k| k.as_str()).map(|s| s.contains("...")).unwrap_or(false);
             if masked
-                && let Some(old) = cfg.profiles.get(i)
+                && let Some(name) = np.get("name").and_then(|n| n.as_str())
+                && let Some(old) = cfg.profiles.iter().find(|p| p.name == name)
             {
                 np["api_key"] = serde_json::json!(old.api_key.clone());
             }
@@ -1105,6 +1090,20 @@ async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json:
             if c.save(&path).is_err() {
                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "配置保存失败").into_response();
             }
+            // 缺陷 3：档案切换后原子重建 client（下轮对话即生效）
+            let (client, pname, pmodel) = match c.active() {
+                Ok(p) => (
+                    Some(betterboxd_core::llm::ChatClient::new(
+                        &p.endpoint, &p.api_key, &p.model,
+                    )),
+                    p.name.clone(),
+                    p.model.clone(),
+                ),
+                Err(_) => (None, String::new(), String::new()),
+            };
+            *app.client.write().unwrap() = client;
+            *app.profile_name.lock().unwrap() = pname;
+            *app.profile_model.lock().unwrap() = pmodel;
             *app.config.lock().unwrap() = c;
             axum::Json(json!({"ok": true})).into_response()
         }
@@ -1123,18 +1122,22 @@ async fn main() {
     let lib_dir = data_dir.join(".betterboxd");
     std::fs::create_dir_all(lib_dir.join("sessions")).expect("创建数据目录失败");
     let config = ensure_config(&lib_dir);
-    let conn = betterboxd_core::Db::open(&lib_dir.join("data.db"))
+    let db_path = lib_dir.join("data.db");
+    let conn = betterboxd_core::Db::open(&db_path)
         .expect("打开数据库失败")
         .into_inner();
     let db = DbHandle::spawn(conn);
     let sessions = Arc::new(SessionStore::new(&lib_dir, db.clone()));
-    // 客户端启动时构建一次（连接池复用）；档案切换（M2）时重建
+    // 独立只读统计连接（评审缺陷 5）：统计四入口全部走它，query_only 纵深防御
+    let stats_conn =
+        betterboxd_core::db::Db::open_stats_conn(&db_path).expect("只读统计连接打开失败");
+    let stats_db = DbHandle::spawn(stats_conn);
     let profile = config.active().expect("缺少活动模型档案").clone();
-    let client = Some(betterboxd_core::llm::ChatClient::new(
+    let client = Arc::new(std::sync::RwLock::new(Some(betterboxd_core::llm::ChatClient::new(
         &profile.endpoint,
         &profile.api_key,
         &profile.model,
-    ));
+    ))));
     let tmdb = TmdbClient::new(
         config.tmdb.key.clone(),
         config.tmdb.proxy.clone(),
@@ -1145,12 +1148,13 @@ async fn main() {
     std::fs::create_dir_all(&posters_dir).ok();
     let app = Arc::new(AppState {
         db,
+        stats_db,
         sessions,
         config: Arc::new(Mutex::new(config)),
         client,
         tmdb,
-        profile_name: pname,
-        profile_model: pmodel,
+        profile_name: Arc::new(Mutex::new(pname)),
+        profile_model: Arc::new(Mutex::new(pmodel)),
         pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
         posters_dir,
     });
@@ -1164,6 +1168,7 @@ async fn main() {
         .route("/api/movie/{id}", get(movie_detail))
         .route("/api/movie/{id}/state", post(movie_state))
         .route("/api/diary", get(diary_list).post(diary_add))
+        .route("/api/diary/{id}", get(diary_get))
         .route("/api/diary/{id}", put(diary_update).delete(diary_delete))
         .route("/api/reviews", get(reviews_list).post(review_add))
         .route(
@@ -1176,7 +1181,7 @@ async fn main() {
         .route("/api/usage/summary", get(usage_summary))
         .route("/api/tools/execute", post(tools_execute))
         .route("/api/stats/run", post(stats_run))
-        .route("/api/saved-queries", get(saved_queries_list).post(saved_query_create))
+        .route("/api/saved-queries", get(saved_queries_list))
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
         .route("/api/chats", get(chats_list))
         .route("/api/chats/{id}", get(chat_detail).delete(chat_delete))
@@ -1186,7 +1191,8 @@ async fn main() {
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))
         .with_state(app);
 
-    let addr: SocketAddr = "0.0.0.0:3000".parse().unwrap();
+    // 默认只监听回环（评审缺陷 9）：私密随记不应对局域网开放
+    let addr: SocketAddr = "127.0.0.1:3000".parse().unwrap();
     println!("Betterboxd server: http://localhost:3000");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, router).await.unwrap();

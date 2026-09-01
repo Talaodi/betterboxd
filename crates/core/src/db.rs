@@ -777,20 +777,37 @@ impl DbHandle {
 /// - in_watchlist：状态量，任意 source 的最后一条变更生效
 ///   （system 自动消除是合法变更）。
 pub fn recompute_movie_state(conn: &Connection, movie_id: i64) -> rusqlite::Result<()> {
-    let pick = |field: &str| -> rusqlite::Result<Option<i64>> {
+    /// 断言拾取三态：无断言 / 显式清除(JSON null) / 值。
+    /// 评审缺陷 1：json_extract 对 JSON null 返回 SQL NULL，"IS NOT NULL" 过滤会把
+    /// 清除断言跳过 → clear_my_rating 永久失效。改用 json_type（JSON null → 'null'
+    /// 文本，缺失路径 → SQL NULL）做存在性检测。
+    #[derive(Debug, PartialEq)]
+    enum Picked {
+        None,
+        Clear,
+        Value(i64),
+    }
+    let pick = |field: &str| -> rusqlite::Result<Picked> {
         let mut st = conn.prepare(
-            "SELECT json_extract(changes_json, ?2), ref_id
+            "SELECT json_extract(changes_json, ?2), json_type(changes_json, ?2), ref_id
              FROM actions
              WHERE movie_id = ?1 AND target = 'movie'
                AND source IN ('edit','agent','standalone')
-               AND json_extract(changes_json, ?2) IS NOT NULL
+               AND json_type(changes_json, ?2) IS NOT NULL
              ORDER BY at DESC, rowid DESC",
         )?;
-        let rows = st.query_map(rusqlite::params![movie_id, format!("$.{field}[1]")], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-        })?;
+        let rows = st.query_map(
+            rusqlite::params![movie_id, format!("$.{field}[1]")],
+            |r| {
+                Ok((
+                    r.get::<_, Option<i64>>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )?;
         for row in rows {
-            let (new_val, ref_id) = row?;
+            let (new_val, jtype, ref_id) = row?;
             if let Some(rid) = ref_id {
                 // 撤销检查：引用的条目/影评必须仍存活
                 let alive: i64 = conn
@@ -805,26 +822,36 @@ pub fn recompute_movie_state(conn: &Connection, movie_id: i64) -> rusqlite::Resu
                     continue; // 已被删除，跳过该断言
                 }
             }
-            return Ok(Some(new_val));
+            return Ok(if jtype == "null" {
+                Picked::Clear
+            } else {
+                new_val.map(Picked::Value).unwrap_or(Picked::None)
+            });
         }
-        Ok(None)
+        Ok(Picked::None)
     };
 
-    let my_rating: Option<i64> = pick("my_rating")?;
-    let liked: Option<i64> = pick("liked")?;
+    let my_rating = match pick("my_rating")? {
+        Picked::Value(v) => Some(v),
+        _ => None,
+    };
+    let liked = match pick("liked")? {
+        Picked::Value(v) => Some(v),
+        _ => None,
+    };
     let watched: i64 = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM diary_entries WHERE movie_id=?1)
               + EXISTS(SELECT 1 FROM reviews WHERE movie_id=?1) > 0",
         rusqlite::params![movie_id],
         |r| r.get(0),
     )?;
-    // in_watchlist：最后一条变更（含 system），at 倒序
+    // in_watchlist：最后一条变更（含 system），at 倒序（json_type 兼容显式 null）
     let in_watchlist: Option<i64> = conn
         .query_row(
             "SELECT json_extract(changes_json, '$.in_watchlist[1]')
              FROM actions
              WHERE movie_id=?1 AND target='movie'
-               AND json_extract(changes_json,'$.in_watchlist[1]') IS NOT NULL
+               AND json_type(changes_json,'$.in_watchlist[1]') IS NOT NULL
              ORDER BY at DESC, rowid DESC LIMIT 1",
             rusqlite::params![movie_id],
             |r| r.get(0),

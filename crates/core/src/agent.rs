@@ -13,9 +13,9 @@ pub const TOOL_FAIL_BREAKER: usize = 3;
 
 /// 视图 Schema 字典（Prompt 第 ③ 层；静态文本，AI 写对 SQL 的前提）。
 pub const SCHEMA_DICTIONARY: &str = r#"【统计视图字典（仅可查询以下视图）】
-v_movies: tmdb_id, title_zh, title_en, title_original, title_main, title_sub, year, release_date, runtime, original_language, genres(JSON数组), directors(JSON数组), my_rating(0-100可空), watched(0/1), in_watchlist, liked, lb_rating, lb_votes
-v_diary_full: entry_id, movie_id, watched_date(YYYY-MM-DD), rating(0-100可空), in_theater, liked, ticket_price_cents(分), private_note, created_at(unix秒), rewatch_index(派生), title_zh, title_en, runtime, genres, directors, my_rating, tags(JSON数组), dimensions_flat(JSON数组 [{dimension,name}]，dimension∈地点|同伴|情绪|场景)
-v_reviews_full: review_id, movie_id, title, body_md, body_len, rating, liked, created_at, title_zh, directors
+v_movies: tmdb_id, title_zh, title_en, title_original, title_main, title_sub, year, release_date, runtime, original_language, genres(JSON数组), directors(JSON数组), tagline, overview, tmdb_rating(社区评分10分制), tmdb_votes, my_rating(0-100可空), watched(0/1), in_watchlist, liked
+v_diary_full: entry_id, movie_id, watched_date(YYYY-MM-DD), rating(0-100可空), in_theater, liked, ticket_price_cents(分), private_note, created_at(unix秒), rewatch_index(派生), title_main, title_sub, title_zh, title_en, year, runtime, genres, directors, my_rating, tags(JSON数组), dimensions_flat(JSON数组 [{dimension,name}]，dimension∈地点|同伴|情绪|场景)
+v_reviews_full: review_id, movie_id, title, body_md, body_len, rating, liked, created_at, updated_at, title_zh, title_en, title_original, genres, directors, my_rating
 v_actions: id, movie_id, target(movie|diary_entry|review), target_id, at(unix秒), source(edit|standalone|agent|import|system), changes_json, is_active(目标行存活=1)
 v_logs: kind(watch|review|chat), id, movie_id, at(日期), brief
 v_lists: list_id, name, source, ranked, external_id, movie_id, rank, added_at
@@ -52,6 +52,28 @@ pub fn month_start_pub() -> i64 {
 }
 use chrono::Datelike;
 
+/// 用量行成本换算（display_currency；缺陷 19：budget_check 与 usage_summary 共用）。
+pub fn cost_of(rows: &[Value], fx: &std::collections::HashMap<String, f64>, cur: &str, since: Option<i64>) -> f64 {
+    rows.iter()
+        .filter(|r| {
+            since
+                .map(|s| r["at"].as_i64().unwrap_or(0) >= s)
+                .unwrap_or(true)
+        })
+        .map(|r| {
+            let c = r["input_cost"].as_f64().unwrap_or(0.0)
+                + r["output_cost"].as_f64().unwrap_or(0.0);
+            let currency = r["currency"].as_str().unwrap_or("");
+            let rate = if currency == cur {
+                1.0
+            } else {
+                fx.get(currency).copied().unwrap_or(0.0)
+            };
+            c * rate
+        })
+        .sum::<f64>()
+}
+
 /// 预算预检：本月与累计（display_currency，未计价贡献 0）。
 pub async fn budget_check(db: &DbHandle, config: &Config) -> Result<(), String> {
     let fx = config.billing.fx_rates.clone();
@@ -64,28 +86,8 @@ pub async fn budget_check(db: &DbHandle, config: &Config) -> Result<(), String> 
         )
         .await
         .map_err(|e| e.to_string())?;
-    let cost = |since: Option<i64>| -> f64 {
-        rows.iter()
-            .filter(|r| {
-                since
-                    .map(|s| r["at"].as_i64().unwrap_or(0) >= s)
-                    .unwrap_or(true)
-            })
-            .map(|r| {
-                let c = r["input_cost"].as_f64().unwrap_or(0.0)
-                    + r["output_cost"].as_f64().unwrap_or(0.0);
-                let currency = r["currency"].as_str().unwrap_or("");
-                let rate = if currency == cur {
-                    1.0
-                } else {
-                    fx.get(currency).copied().unwrap_or(0.0)
-                };
-                c * rate
-            })
-            .sum::<f64>()
-    };
-    let month = cost(Some(ms));
-    let total = cost(None);
+    let month = cost_of(&rows, &fx, &cur, Some(ms));
+    let total = cost_of(&rows, &fx, &cur, None);
     if let Some(b) = config.billing.budget_monthly
         && month >= b
     {
@@ -116,14 +118,35 @@ pub async fn run(
     cancel: CancellationToken,
     mut on_event: impl FnMut(AgentEvent) + Send,
 ) -> Result<RunSummary, String> {
-    budget_check(db, config).await?;
-
+    // 评审缺陷 10：先入历史再预检——预算拒绝时用户消息也已落盘（刷新不丢）
     messages.push(json!({"role": "user", "content": user_text}));
+
+    // 上下文溢出预警（缺陷 4 残余风险）：字符×1.5 保守估算 vs context_length
+    if let Ok(p) = config.active() {
+        let chars: usize = messages
+            .iter()
+            .map(|m| {
+                m["content"]
+                    .as_str()
+                    .map(|s| s.len())
+                    .unwrap_or_else(|| m["content"].to_string().len())
+            })
+            .sum();
+        let est_tokens = (chars as f64 * 1.5) as u64;
+        if est_tokens > p.context_length.saturating_sub(p.max_output_tokens.unwrap_or(4096)) {
+            return Err(
+                "会话上下文已接近模型上限，请到 Chats 页点「+ 新建」开启新会话后继续"
+                    .into(),
+            );
+        }
+    }
+
+    budget_check(db, config).await?;
 
     let mut system = format!(
         "你是 Betterboxd，一位中文影迷的观影数据助手。平等、简明、不谄媚。\n\
          【诚实边界】不编造票房/影评/榜单；影片事实必须来自工具返回；不知道就说不知道。\n\
-         【工具纪律】涉及写操作先搜索确认影片；统计必须调用 run_stats 用 SQL 计算，\
+         【工具纪律】涉及 add 写操作先搜索确认影片；update/delete 用 lookup_diary 定位 entry_id 即可（无需搜索影片）；统计必须调用 run_stats 用 SQL 计算，\
          禁止自己数数或心算汇总；日期相对词（今年/上月）翻译为 SQLite 日期表达式。\
          SQL 的输出列必须用中文 AS 别名（如 AS 月份、AS 平均分），标签列在前。\n\
          【统计工作流】①统计前先 list_saved_queries：已有同类项目→用 run_stats 的\
@@ -263,6 +286,17 @@ pub async fn run(
                     let payload = match &result {
                         Ok(v) => v.to_string(),
                         Err(e) => json!({"error": e}).to_string(),
+                    };
+                    // 评审缺陷 4：载荷上限 16KB（UTF-8 安全截断），防单步上下文炸弹
+                    const MAX_TOOL_PAYLOAD: usize = 16 * 1024;
+                    let payload = if payload.len() > MAX_TOOL_PAYLOAD {
+                        let mut cut = MAX_TOOL_PAYLOAD;
+                        while cut > 0 && !payload.is_char_boundary(cut) {
+                            cut -= 1;
+                        }
+                        format!("{}\n…[结果超过16KB已截断]", &payload[..cut])
+                    } else {
+                        payload
                     };
                     on_event(AgentEvent {
                         kind: AgentEventKind::ToolDone {

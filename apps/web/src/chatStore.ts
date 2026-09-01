@@ -163,12 +163,17 @@ function handleFrame(s: Store, key: string, f: Frame) {
     case "done":
       s.streaming = false;
       {
+        // 评审缺陷 24：打断/无文本时也要收口——空进度行丢弃，有文本转正式气泡
         const last = s.messages[s.messages.length - 1];
-        if (last?.role === "assistant") {
-          s.messages = [
-            ...s.messages.slice(0, -1),
-            { role: "assistant", text: s.acc, usage: f.tokens, final: true },
-          ];
+        if (last?.role === "assistant" && last.final === false) {
+          if (s.acc) {
+            s.messages = [
+              ...s.messages.slice(0, -1),
+              { role: "assistant", text: s.acc, usage: f.tokens, final: true },
+            ];
+          } else {
+            s.messages = s.messages.slice(0, -1);
+          }
         }
       }
       maybeClose(key);

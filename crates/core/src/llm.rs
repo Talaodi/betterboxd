@@ -260,7 +260,12 @@ pub struct Outcome {
 impl ChatClient {
     pub fn new(endpoint: &str, api_key: &str, model: &str) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            // 评审缺陷 6/11：连接 10s + 空闲读 60s（SSE 流式安全，不设总超时）
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .read_timeout(std::time::Duration::from_secs(60))
+                .build()
+                .expect("HTTP 客户端构建失败"),
             endpoint: endpoint.trim_end_matches('/').to_string(),
             api_key: api_key.to_string(),
             model: model.to_string(),

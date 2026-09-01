@@ -13,10 +13,14 @@ export type DiaryFormData = {
 
 const DIMS = ["地点", "同伴", "情绪", "场景"];
 
-export function emptyDiaryForm(): DiaryFormData {
+const todayStr = () => {
   const nowD = new Date();
+  return `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
+};
+
+export function emptyDiaryForm(): DiaryFormData {
   return {
-    watched_date: `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`,
+    watched_date: todayStr(),
     rating: null,
     in_theater: false,
     liked: false,
@@ -27,9 +31,10 @@ export function emptyDiaryForm(): DiaryFormData {
   };
 }
 
-/** 从 API args（模型的 JSON）构造表单初始值。 */
+/** 从 API args（模型的 JSON）构造表单初始值。
+ *  缺失字段回退**当日/默认值**而非占位垃圾——update 场景应由调用方
+ *  拉取条目回填（评审缺陷 2），此处只服务 add。 */
 export function diaryFormFromArgs(args: Record<string, unknown>): DiaryFormData {
-  const nowD = new Date();
   const dims: Record<string, string[]> = {};
   if (args["dimensions"] && typeof args["dimensions"] === "object") {
     for (const [k, v] of Object.entries(args["dimensions"] as Record<string, unknown>)) {
@@ -37,7 +42,7 @@ export function diaryFormFromArgs(args: Record<string, unknown>): DiaryFormData 
     }
   }
   return {
-    watched_date: (args["watched_date"] as string) ?? `${nowD.getFullYear()}-...`,
+    watched_date: (args["watched_date"] as string) ?? todayStr(),
     rating: (args["rating"] as number) ?? null,
     in_theater: (args["in_theater"] as boolean) ?? false,
     liked: (args["liked"] as boolean) ?? false,
