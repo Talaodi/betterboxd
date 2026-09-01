@@ -925,7 +925,7 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                     let new_rating = match patch_i64("rating") {
                         Patch::Unchanged => old_rating,
                         Patch::Clear => None,
-                        Patch::Set(v) => match validate_rating(Some(v)) { Ok(r) => Some(r.expect("已校验")), Err(e) => return Err(rusqlite::Error::InvalidParameterName(e.into())) },
+                        Patch::Set(v) => match validate_rating(Some(v)) { Ok(r) => Some(r.expect("已校验")), Err(e) => return Err(rusqlite::Error::InvalidParameterName(e)) },
                     };
                     let new_theater = match patch_bool("in_theater") {
                         Patch::Unchanged => old_theater != 0,
@@ -1122,7 +1122,7 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                         Some(Value::Null) => None,
                         Some(v) => match validate_rating(v.as_i64()) {
                             Ok(r) => Some(r.expect("已校验")),
-                            Err(e) => return Err(rusqlite::Error::InvalidParameterName(e.into())),
+                            Err(e) => return Err(rusqlite::Error::InvalidParameterName(e)),
                         },
                     };
                     let new_liked = match args.get("liked") {
