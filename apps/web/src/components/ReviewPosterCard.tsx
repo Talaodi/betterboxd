@@ -1,7 +1,7 @@
 /** 影评海报卡（从 Reviews 页抽取，影片 Log 段复用同款渲染）。
  *  左侧海报固定高度占满；右侧内容收起时裁切到海报等高（无空白）；
- *  「展开全文」浮层按钮叠加在右下角。 */
-import { useState } from "react";
+ *  「展开全文」浮层按钮叠加在右下角；短文（未超高）不渲染按钮。 */
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Poster from "./Poster";
 import { StarsDisplay } from "./Stars";
@@ -31,6 +31,13 @@ export default function ReviewPosterCard({
   onDelete?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // 内容实际高度 ≤ 收起高度 → 短文，无需展开按钮
+  const [overflow, setOverflow] = useState(false);
+  const measureRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = measureRef.current;
+    if (el) setOverflow(el.scrollHeight > POSTER_H - 30 + 2);
+  }, [review.body_md]);
   const date = review.created_at
     ? new Date(review.created_at * 1000).toISOString().slice(0, 10)
     : null;
@@ -50,7 +57,11 @@ export default function ReviewPosterCard({
 
         {/* 右：内容（相对定位承载浮层按钮；收起时高度与海报一致） */}
         <div className="relative min-w-0 flex-1 py-2.5 pr-4">
-          <div className={open ? "" : "overflow-hidden"} style={open ? undefined : { maxHeight: POSTER_H - 30 }}>
+          <div
+            ref={measureRef}
+            className={open ? "" : "overflow-hidden"}
+            style={open ? undefined : { maxHeight: POSTER_H - 30 }}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs text-[#5a6b7c]">
@@ -84,13 +95,15 @@ export default function ReviewPosterCard({
               <Markdown>{review.body_md}</Markdown>
             </div>
           </div>
-          {/* 浮层展开按钮：不占布局高度 → 收起时无海报下方空白 */}
-          <button
-            className="absolute bottom-1.5 right-4 rounded bg-[#232b35]/95 px-2 py-0.5 text-xs text-[#40bcf4]"
-            onClick={() => setOpen(!open)}
-          >
-            {open ? "收起 ▲" : "展开全文 ▼"}
-          </button>
+          {/* 浮层展开按钮：不占布局高度 → 收起时无海报下方空白；短文不渲染 */}
+          {(overflow || open) && (
+            <button
+              className="absolute bottom-1.5 right-4 rounded bg-[#232b35]/95 px-2 py-0.5 text-xs text-[#40bcf4]"
+              onClick={() => setOpen(!open)}
+            >
+              {open ? "收起 ▲" : "展开全文 ▼"}
+            </button>
+          )}
         </div>
       </div>
     </article>

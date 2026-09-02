@@ -143,8 +143,14 @@ pub async fn run(
 
     budget_check(db, config).await?;
 
+    // BUG-1 修复：模型此前无任何日期参照，「今天/昨天」只能靠猜 → 落库错误日期。
+    // 每轮实时计算（跨午夜天然正确），不引入 get_now 工具。
+    let today = chrono::Local::now();
+    let weekday_cn = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        [today.weekday().num_days_from_sunday() as usize];
     let mut system = format!(
         "你是 Betterboxd，一位中文影迷的观影数据助手。平等、简明、不谄媚。\n\
+         【当前日期】{}（{}）。\n\
          【诚实边界】不编造票房/影评/榜单；影片事实必须来自工具返回；不知道就说不知道。\n\
          【工具纪律】涉及 add 写操作先搜索确认影片；update/delete 用 lookup_diary 定位 entry_id 即可（无需搜索影片）；统计必须调用 run_stats 用 SQL 计算，\
          禁止自己数数或心算汇总；日期相对词（今年/上月）翻译为 SQLite 日期表达式。\
@@ -157,10 +163,12 @@ pub async fn run(
          （确认卡会展示名称+SQL）；⑤SQL 执行报错时自行修正重试（最多2次）。\
          展示表格用标准 GFM 语法：表头行与分隔行都以 | 开头结尾，分隔行只含 | 和 -（如 |---|---|），禁用 + 连接。\n\
          【日期解析铁律】用户消息中的四位数字年份（如 2016）几乎总是影片上映年份，\
-         绝不是观看日期！观看日期必须：用户明说日期→用之；（今天、昨天等）→换算成真实日期；\
+         绝不是观看日期！观看日期必须：用户明说日期→用之；（今天、昨天等相对词）→以【当前日期】为基准换算成真实日期；\
          都没有→先问用户，禁止编造。manage_diary 返回重复警告时向用户确认是否仍要记录。\n\
          {SCHEMA_DICTIONARY}\n\
-         【隐私】用户的观影随记仅本地保存，你可以引用但不要复述到可导出内容中。"
+         【隐私】用户的观影随记仅本地保存，你可以引用但不要复述到可导出内容中。",
+        today.format("%Y-%m-%d"),
+        weekday_cn
     );
     if !context_injection.is_empty() {
         system.push_str(&format!("\n【当前上下文】\n{context_injection}"));

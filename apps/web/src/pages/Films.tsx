@@ -7,7 +7,6 @@ import { StarsDisplay } from "../components/Stars";
 const TABS = [
   { key: "watched", label: "Watched" },
   { key: "watchlist", label: "Watchlist" },
-  { key: "all", label: "All" },
 ];
 
 export default function Films() {

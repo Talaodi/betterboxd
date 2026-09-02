@@ -228,7 +228,7 @@ async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Respon
     let diary = app
         .db
         .select_json(&format!(
-            "SELECT entry_id, watched_date, rating, liked, in_theater, ticket_price_cents,
+            "SELECT entry_id, movie_id, watched_date, rating, liked, in_theater, ticket_price_cents,
                     private_note, rewatch_index, tags, dimensions_flat,
                     title_main, title_sub, year
              FROM v_diary_full WHERE movie_id={id}"
@@ -291,6 +291,16 @@ async fn movie_state(
     AxPath(id): AxPath<i64>,
     Json(args): Json<serde_json::Value>,
 ) -> Response {
+    // 架构收敛：评分/喜欢唯一断言源 = Diary/Review，REST 也不放行
+    for banned in ["my_rating", "liked", "clear_my_rating"] {
+        if args.get(banned).is_some() {
+            return (
+                StatusCode::BAD_REQUEST,
+                "评分/喜欢只能通过记一笔（Diary）或影评（Review）修改",
+            )
+                .into_response();
+        }
+    }
     let mut full = args.clone();
     full["movie_id"] = json!(id);
     match tools::execute("set_movie_state", &tool_ctx(&app), full).await {

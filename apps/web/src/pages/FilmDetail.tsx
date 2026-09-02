@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import DiaryEntryRow from "../components/DiaryEntryRow";
 import ReviewPosterCard from "../components/ReviewPosterCard";
 import ChatListRow from "../components/ChatListRow";
-import { StarsEditor } from "../components/Stars";
+import { StarsDisplay, StarsEditor } from "../components/Stars";
 
 type Detail = {
   movie: MovieRow;
@@ -17,9 +17,10 @@ export default function FilmDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [tab, setTab] = useState("all");
   const [showDiary, setShowDiary] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  // Log 三板块折叠态（点击板块标题收起内容仅剩标题条）
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   const load = () => {
     getJson<Detail>(`/api/movie/${id}`)
@@ -28,30 +29,14 @@ export default function FilmDetail() {
   };
   useEffect(load, [id]);
 
-  const setState = async (patch: Record<string, unknown>) => {
+  const setWatchlist = async (v: boolean) => {
     try {
-      await sendJson(`/api/movie/${id}/state`, "POST", patch);
+      await sendJson(`/api/movie/${id}/state`, "POST", { in_watchlist: v });
       load();
     } catch (e) {
       alert(`状态修改失败: ${(e as Error).message}`);
     }
   };
-
-  const filtered = useMemo(() => {
-    if (!detail) return [];
-    return tab === "all" ? detail.logs : detail.logs.filter((l) => l.kind === tab);
-  }, [detail, tab]);
-
-  // 连续同类型日志合并为一段（整体保持时间序，可出现多个同类型段）
-  const segments = useMemo(() => {
-    const segs: { kind: string; rows: LogRow[] }[] = [];
-    for (const l of filtered) {
-      const last = segs[segs.length - 1];
-      if (last && last.kind === l.kind) last.rows.push(l);
-      else segs.push({ kind: l.kind, rows: [l] });
-    }
-    return segs;
-  }, [filtered]);
 
   const delEntry = async (entryId: string) => {
     if (!window.confirm("删除这条观影记录？（Action 账目会保留并回退状态）")) return;
@@ -67,6 +52,10 @@ export default function FilmDetail() {
   const m = detail.movie;
   const directors = parseJsonArray(m.directors).join(" / ");
   const genres = parseJsonArray(m.genres);
+  const logs = detail.logs;
+  const diaryLogs = logs.filter((l) => l.kind === "watch");
+  const reviewLogs = logs.filter((l) => l.kind === "review");
+  const chatLogs = logs.filter((l) => l.kind === "chat");
 
   return (
     <div className="mx-auto max-w-[1100px] px-6 pt-6">
@@ -111,29 +100,34 @@ export default function FilmDetail() {
           )}
         </div>
 
-        {/* 右：动作面板（LB 式竖排） */}
+        {/* 右：动作面板（LB 式竖排；评分/喜欢只读——唯一断言源 = Diary/Review） */}
         <div className="w-[210px] shrink-0 rounded-lg border border-[#33414f] bg-[#1b222b] p-4">
           <div className="flex justify-around pb-3">
             <button
               className={"flex flex-col items-center text-xs " +
                 (m.in_watchlist ? "text-[#ff8000]" : "text-[#8899aa]")}
-              onClick={() => setState({ in_watchlist: !m.in_watchlist })}
+              onClick={() => setWatchlist(!m.in_watchlist)}
             >
               <span className="text-xl">🔖</span>
               想看
             </button>
-            <button
+            <span
               className={"flex flex-col items-center text-xs " +
                 (m.liked ? "text-[#00e054]" : "text-[#8899aa]")}
-              onClick={() => setState({ liked: !m.liked })}
+              title="喜欢通过记一笔或影评产生"
             >
-              <span className="text-xl">♥</span>
+              <span className="text-xl">{m.liked ? "♥" : "♡"}</span>
               喜欢
-            </button>
+            </span>
           </div>
           <div className="border-t border-[#2c3440] pt-3">
             <p className="mb-1 text-center text-xs text-[#8899aa]">Rate</p>
-            <StarsEditor value={m.my_rating} onChange={(v) => setState({ my_rating: v })} />
+            <div className="flex justify-center">
+              <StarsDisplay value={m.my_rating} />
+            </div>
+            <p className="mt-1 text-center text-[10px] leading-4 text-[#5a6b7c]">
+              评分通过记一笔或影评修改
+            </p>
           </div>
           <div className="mt-3 space-y-2 border-t border-[#2c3440] pt-3">
             <button
@@ -158,95 +152,117 @@ export default function FilmDetail() {
         </div>
       </div>
 
-      {/* Log Tab + 流 */}
-      <div className="mt-8">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex gap-1">
-            {[["all", "全部"], ["watch", "看"], ["review", "评"], ["chat", "聊"]].map(([k, label]) => (
-              <button
-                key={k}
-                className={"rounded px-3 py-1.5 text-sm " +
-                  (tab === k ? "bg-[#2c3440] text-white" : "text-[#8899aa]")}
-                onClick={() => setTab(k)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {detail.lists.length > 0 && (
-            <div className="text-xs">
-              {detail.lists.map((l) => (
-                <span key={l.list_id} className="mr-2 rounded bg-[#2c3440] px-2 py-1">
-                  {l.ranked && l.rank ? `Rank #${l.rank} in ${l.name}` : `In ${l.name}`}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        {/* Log 段：整体按时间排列，连续同类型日志合并为一段，每段按对应页面样式渲染 */}
-        <div className="space-y-6">
-          {filtered.length === 0 && <p className="text-sm text-[#5a6b7c]">暂无记录</p>}
-          {segments.map((seg, si) => (
-            <div key={si}>
-              <p className="mb-1.5 px-2 text-xs font-medium tracking-widest text-[#5a6b7c]">
-                {seg.kind === "watch" ? "DIARY" : seg.kind === "review" ? "REVIEWS" : "CHATS"}
-              </p>
-              {seg.kind === "watch" && (
-                <div className="border-t border-[#2c3440]">
-                  {seg.rows.map((l, ri) => {
-                    const d = l.diary as unknown as DiaryRow | undefined;
-                    if (!d) return null;
-                    const entry: DiaryRow = { ...d, entry_id: l.id };
-                    const prev = seg.rows[ri - 1];
-                    const firstOfMonth =
-                      !prev || prev.at.slice(0, 7) !== l.at.slice(0, 7);
-                    return (
-                      <DiaryEntryRow
-                        key={l.kind + l.id}
-                        entry={entry}
-                        firstOfMonth={firstOfMonth}
-                        onDelete={delEntry}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-              {seg.kind === "review" && (
-                <div className="space-y-4">
-                  {seg.rows.map((l) =>
-                    l.review ? (
-                      <ReviewPosterCard
-                        key={l.kind + l.id}
-                        review={l.review as never}
-                        movieId={m.tmdb_id}
-                        movieTitle={m.title_main}
-                        titleSub={m.title_sub || null}
-                      />
-                    ) : null,
-                  )}
-                </div>
-              )}
-              {seg.kind === "chat" && (
-                <div>
-                  {seg.rows.map((l) => (
-                    <ChatListRow
-                      key={l.kind + l.id}
-                      sessionId={l.id}
-                      title={l.brief}
-                      subtitle={l.at}
-                      tmdbId={m.tmdb_id}
-                      movieTitle={m.title_main}
-                      onClick={() => navigate(`/chats?open=${l.id}`)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+      {/* List 归属徽章 */}
+      {detail.lists.length > 0 && (
+        <div className="mt-6 text-xs">
+          {detail.lists.map((l) => (
+            <span key={l.list_id} className="mr-2 rounded bg-[#2c3440] px-2 py-1">
+              {l.ranked && l.rank ? `Rank #${l.rank} in ${l.name}` : `In ${l.name}`}
+            </span>
           ))}
         </div>
+      )}
+
+      {/* Log 三板块竖排：Diary → Reviews → Chats，各板块内时间倒序，标题可折叠 */}
+      <div className="mt-8 space-y-6">
+        <LogSection
+          label="DIARY"
+          count={diaryLogs.length}
+          toggle={() => setCollapsed((c) => ({ ...c, diary: !c.diary }))}
+          isCollapsed={!!collapsed.diary}
+        >
+          <div className="border-t border-[#2c3440]">
+            {diaryLogs.map((l, ri) => {
+              const d = l.diary as unknown as DiaryRow | undefined;
+              if (!d) return null;
+              const entry: DiaryRow = { ...d, entry_id: l.id };
+              const prev = diaryLogs[ri - 1];
+              const firstOfMonth = !prev || prev.at.slice(0, 7) !== l.at.slice(0, 7);
+              return (
+                <DiaryEntryRow
+                  key={l.kind + l.id}
+                  entry={entry}
+                  firstOfMonth={firstOfMonth}
+                  onDelete={delEntry}
+                />
+              );
+            })}
+          </div>
+        </LogSection>
+        <LogSection
+          label="REVIEWS"
+          count={reviewLogs.length}
+          toggle={() => setCollapsed((c) => ({ ...c, reviews: !c.reviews }))}
+          isCollapsed={!!collapsed.reviews}
+        >
+          <div className="space-y-4">
+            {reviewLogs.map((l) =>
+              l.review ? (
+                <ReviewPosterCard
+                  key={l.kind + l.id}
+                  review={l.review as never}
+                  movieId={m.tmdb_id}
+                  movieTitle={m.title_main}
+                  titleSub={m.title_sub || null}
+                />
+              ) : null,
+            )}
+          </div>
+        </LogSection>
+        <LogSection
+          label="CHATS"
+          count={chatLogs.length}
+          toggle={() => setCollapsed((c) => ({ ...c, chats: !c.chats }))}
+          isCollapsed={!!collapsed.chats}
+        >
+          <div>
+            {chatLogs.map((l) => (
+              <ChatListRow
+                key={l.kind + l.id}
+                sessionId={l.id}
+                title={l.brief}
+                subtitle={l.at}
+                tmdbId={m.tmdb_id}
+                movieTitle={m.title_main}
+                onClick={() => navigate(`/chats?open=${l.id}`)}
+              />
+            ))}
+          </div>
+        </LogSection>
       </div>
       {showDiary && <DiaryModal movieId={m.tmdb_id} onClose={() => { setShowDiary(false); load(); }} onSaved={() => { setShowDiary(false); load(); }} />}
       {showReview && <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />}
+    </div>
+  );
+}
+
+// ============ Log 三板块（可折叠）============
+function LogSection({
+  label,
+  count,
+  children,
+  toggle,
+  isCollapsed,
+}: {
+  label: string;
+  count: number;
+  children: ReactNode;
+  toggle: () => void;
+  isCollapsed: boolean;
+}) {
+  return (
+    <div>
+      <button
+        className="mb-1.5 flex w-full items-center gap-2 px-2 text-left"
+        onClick={toggle}
+      >
+        <span className="text-xs font-medium tracking-widest text-[#5a6b7c]">{label}</span>
+        <span className="text-xs text-[#40bcf4]">{count}</span>
+        <span className="ml-auto text-xs text-[#5a6b7c]">
+          {isCollapsed ? "展开 ▼" : "收起 ▲"}
+        </span>
+      </button>
+      {!isCollapsed && children}
     </div>
   );
 }

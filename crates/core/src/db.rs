@@ -769,9 +769,11 @@ impl DbHandle {
 
 // ============ 影片级状态重算（Action 账目 → 缓存列）============
 
-/// 影片级状态重算规则（design.md 定稿）：
+/// 影片级状态重算规则（design.md 定稿；P1 架构收敛后）：
 /// - my_rating/liked：target=movie 的断言 Action，按 at 倒序取第一条
-///   source ∈ {edit,agent,standalone} 且 changes 含该字段的**新值**；
+///   source ∈ {edit,agent,standalone} 且 changes 含该字段的**新值**。
+///   断言唯一产生源 = Diary/Review（条目/影评级，带 ref_id 回指）；
+///   standalone 已不再产生新断言，白名单仅为历史数据兼容；
 ///   带 ref_id 的断言若引用的条目/影评已被删除（撤销语义）则跳过；
 /// - watched：派生（存在 Diary 条目或 Review 即真）；
 /// - in_watchlist：状态量，任意 source 的最后一条变更生效
@@ -779,7 +781,7 @@ impl DbHandle {
 pub fn recompute_movie_state(conn: &Connection, movie_id: i64) -> rusqlite::Result<()> {
     /// 断言拾取三态：无断言 / 显式清除(JSON null) / 值。
     /// 评审缺陷 1：json_extract 对 JSON null 返回 SQL NULL，"IS NOT NULL" 过滤会把
-    /// 清除断言跳过 → clear_my_rating 永久失效。改用 json_type（JSON null → 'null'
+    /// 清除断言跳过 → 条目评分清除永久失效。改用 json_type（JSON null → 'null'
     /// 文本，缺失路径 → SQL NULL）做存在性检测。
     #[derive(Debug, PartialEq)]
     enum Picked {

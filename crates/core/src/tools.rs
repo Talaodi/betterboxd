@@ -190,13 +190,10 @@ pub fn registry() -> ToolRegistry {
             },
             ToolMeta {
                 name: "set_movie_state",
-                description: "直接修改影片状态（不产生观影记录）：my_rating 最终评分 0-100、liked 喜欢、in_watchlist 想看、clear_my_rating 清除最终评分（审计保留旧值）。至少提供一个字段。",
+                description: "只管理想看（in_watchlist）。评分/喜欢必须通过 manage_diary 或 manage_reviews 产生（条目级），本工具不接受也不修改它们。清除影片评分/喜欢同样改对应条目。",
                 parameters: obj_schema(
                     json!({
                         "movie_id": {"type": "integer"},
-                        "my_rating": {"type": "integer"},
-                        "clear_my_rating": {"type": "boolean", "description": "清除最终评分"},
-                        "liked": {"type": "boolean"},
                         "in_watchlist": {"type": "boolean"}
                     }),
                     &["movie_id"],
@@ -1219,56 +1216,33 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
 async fn set_movie_state(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let args = confirmed_args(ctx, "set_movie_state", args.clone()).await?;
     let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
-    let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
-    let rating_req = validate_rating(get_i64(&args, "my_rating"))?;
-    let clear_rating = get_bool(&args, "clear_my_rating").unwrap_or(false);
-    let liked = get_bool(&args, "liked");
-    let watchlist = get_bool(&args, "in_watchlist");
-    if rating_req.is_none() && !clear_rating && liked.is_none() && watchlist.is_none() {
-        return Err("未提供任何状态字段（my_rating/liked/in_watchlist/clear_my_rating）".into());
+    // 架构收敛：rating/liked 断言唯一源 = Diary/Review。越权字段显式拒绝（防旧提示词残留路径）。
+    for banned in ["my_rating", "liked", "clear_my_rating"] {
+        if args.get(banned).is_some() {
+            return Err(
+                "评分/喜欢只能通过 manage_diary 或 manage_reviews 产生，不能用 set_movie_state"
+                    .into(),
+            );
+        }
     }
+    let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
+    let watchlist = get_bool(&args, "in_watchlist");
+    let Some(w) = watchlist else {
+        return Err("缺少 in_watchlist".into());
+    };
     ctx.db
         .call(move |c| {
             let tx = c.unchecked_transaction()?;
             let at = crate::now();
-            if clear_rating {
-                // 清除 = 终态断言 NULL（重算命中即停），审计保留旧值
-                let old: Option<i64> = tx
-                    .query_row(
-                        "SELECT my_rating FROM movies WHERE tmdb_id=?1",
-                        params![movie_id],
-                        |r| r.get(0),
-                    )
-                    .ok();
-                let changes =
-                    serde_json::json!({"my_rating": [old, serde_json::Value::Null]}).to_string();
-                tx.execute(
-                    "INSERT INTO actions (id, movie_id, target, target_id, at, source, changes_json)
-                     VALUES (?1,?2,'movie',?2,?3,'standalone',?4)",
-                    params![uuid::Uuid::now_v7().to_string(), movie_id, at, changes],
-                )?;
-                tx.execute(
-                    "UPDATE movies SET my_rating=NULL WHERE tmdb_id=?1",
-                    params![movie_id],
-                )?;
-            }
-            if let Some(r) = rating_req {
-                assert_and_recompute(&tx, movie_id, at, "standalone", None, "my_rating", r)?;
-            }
-            if let Some(l) = liked {
-                assert_and_recompute(&tx, movie_id, at, "standalone", None, "liked", l as i64)?;
-            }
-            if let Some(w) = watchlist {
-                assert_and_recompute(
-                    &tx,
-                    movie_id,
-                    at,
-                    "standalone",
-                    None,
-                    "in_watchlist",
-                    w as i64,
-                )?;
-            }
+            assert_and_recompute(
+                &tx,
+                movie_id,
+                at,
+                "standalone",
+                None,
+                "in_watchlist",
+                w as i64,
+            )?;
             recompute_movie_state(&tx, movie_id)?;
             tx.commit()?;
             Ok(())
@@ -1332,7 +1306,7 @@ mod write_regression_tests {
     #[tokio::test]
     async fn stale_warning_is_scoped_to_movie() {
         let (db, ctx) = setup_two_movies();
-        // 843：条目断言 90；844：更晚的独立改分
+        // 843：条目断言 90；844：更晚的条目断言（跨影片）
         execute(
             "manage_diary",
             &ctx,
@@ -1342,9 +1316,9 @@ mod write_regression_tests {
         .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
         execute(
-            "set_movie_state",
+            "manage_diary",
             &ctx,
-            json!({"movie_id":844,"my_rating":70}),
+            json!({"action":"add","movie_id":844,"watched_date":"2026-08-16","rating":70}),
         )
         .await
         .unwrap();
@@ -1374,19 +1348,26 @@ mod write_regression_tests {
     // ===== 评审修复回归（2026-09-01）=====
 
     #[tokio::test]
-    async fn clear_my_rating_actually_clears_and_survives_recompute() {
+    async fn entry_rating_clear_survives_recompute_and_banned_fields_rejected() {
         let (db, ctx) = setup_two_movies();
+        // 评分唯一断言源 = Diary：加条目评分 → 清除条目评分 → 终态清除存活
         execute(
-            "set_movie_state",
+            "manage_diary",
             &ctx,
-            json!({"movie_id": 843, "my_rating": 90}),
+            json!({"action":"add","movie_id":843,"watched_date":"2026-08-15","rating":90}),
         )
         .await
         .unwrap();
+        let entry_id: String = db
+            .call(|c| {
+                c.query_row("SELECT id FROM diary_entries WHERE movie_id=843", [], |r| r.get(0))
+            })
+            .await
+            .unwrap();
         execute(
-            "set_movie_state",
+            "manage_diary",
             &ctx,
-            json!({"movie_id": 843, "clear_my_rating": true}),
+            json!({"action":"update","entry_id":entry_id,"rating":null}),
         )
         .await
         .unwrap();
@@ -1396,9 +1377,9 @@ mod write_regression_tests {
             })
             .await
             .unwrap();
-        assert_eq!(r, None, "清除后 my_rating 必须为 NULL（缺陷 1）");
-        // 触发一次无关重算（再加 liked）后仍不得复活
-        execute("set_movie_state", &ctx, json!({"movie_id": 843, "liked": true}))
+        assert_eq!(r, None, "条目评分清除后 my_rating 必须为 NULL");
+        // 触发一次无关重算（想看切换）后仍不得复活
+        execute("set_movie_state", &ctx, json!({"movie_id": 843, "in_watchlist": true}))
             .await
             .unwrap();
         let r2: Option<i64> = db
@@ -1407,7 +1388,26 @@ mod write_regression_tests {
             })
             .await
             .unwrap();
-        assert_eq!(r2, None, "重算不得把清除断言跳过后落到旧值（缺陷 1）");
+        assert_eq!(r2, None, "重算不得把清除断言跳过后落到旧值");
+        // 架构收敛：set_movie_state 拒绝评分/喜欢字段
+        for banned in ["my_rating", "liked", "clear_my_rating"] {
+            let mut payload = serde_json::Map::new();
+            payload.insert("movie_id".into(), json!(843));
+            payload.insert(banned.into(), json!(true));
+            let err = execute("set_movie_state", &ctx, Value::Object(payload))
+                .await
+                .unwrap_err();
+            assert!(
+                err.contains("manage_diary 或 manage_reviews"),
+                "越权字段 {banned} 必须被拒绝，实际: {err}"
+            );
+        }
+        // 无关重算没有把想看搞丢
+        let w: i64 = db
+            .call(|c| c.query_row("SELECT in_watchlist FROM movies WHERE tmdb_id=843", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(w, 1, "想看断言应存活");
     }
 
     #[tokio::test]

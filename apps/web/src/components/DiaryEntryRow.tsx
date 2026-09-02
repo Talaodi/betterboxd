@@ -29,12 +29,14 @@ export default function DiaryEntryRow({
         className="flex cursor-pointer items-center px-2 py-2 hover:bg-[#1b222b]"
         onClick={() => setOpen(!open)}
       >
-        {/* 月份日历徽章 */}
-        <div className="w-20 shrink-0 text-center">
+        {/* 月份日历徽章（LB 式，调大版） */}
+        <div className="w-24 shrink-0 text-center">
           {firstOfMonth && (
-            <div className="inline-block rounded border border-[#33414f] bg-[#1b222b] px-2 py-1 leading-tight">
-              <div className="text-sm font-bold text-[#dfe7ef]">{MONTHS[Number(m) - 1]}</div>
-              <div className="text-xs text-[#5a6b7c]">{y}</div>
+            <div className="inline-block rounded border border-[#33414f] bg-[#1b222b] px-3 py-1.5 leading-tight">
+              <div className="text-lg font-bold tracking-wide text-[#dfe7ef]">
+                {MONTHS[Number(m) - 1]}
+              </div>
+              <div className="text-sm text-[#5a6b7c]">{y}</div>
             </div>
           )}
         </div>
@@ -46,11 +48,15 @@ export default function DiaryEntryRow({
           onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
           className="mr-4 h-[63px] w-[42px] rounded object-cover"
         />
-        {/* 片名 + 标记 */}
+        {/* 片名 + 标记（主副标题相同则不重复渲染） */}
         <div className="min-w-0 flex-1">
           <div className="truncate text-base font-semibold">
             {entry.title_main}
-            <span className="ml-2 font-normal italic text-[#5a6b7c]">({entry.title_sub})</span>
+            {entry.title_sub && entry.title_sub !== entry.title_main && (
+              <span className="ml-2 font-normal italic text-[#5a6b7c]">
+                ({entry.title_sub})
+              </span>
+            )}
           </div>
         </div>
         {/* 年份 */}
@@ -91,7 +97,7 @@ export default function DiaryEntryRow({
       </div>
       {/* 展开区：随记 + 维度 + 标签 + 影院信息 */}
       {open && (
-        <div className="ml-[104px] mr-4 border-l-2 border-[#2c3440] py-3 pl-4">
+        <div className="ml-[120px] mr-4 border-l-2 border-[#2c3440] py-3 pl-4">
           <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#8899aa]">
             {entry.in_theater === 1 && (
               <span>

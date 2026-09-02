@@ -651,14 +651,26 @@ async fn main() {
         };
         let _ = insert_entry(&conn, movie_id, &plan);
     }
-    // 独立改分演示：盗梦空间 6 月改分 88→85
+    // 改分演示：盗梦空间 6 月改条目评分 88→85（edit，条目级断言 ref 回指）
     if film_ids[0] != 0 {
+        let eid: String = conn
+            .query_row(
+                "SELECT id FROM diary_entries WHERE movie_id=?1 ORDER BY watched_date LIMIT 1",
+                params![film_ids[0]],
+                |r| r.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "UPDATE diary_entries SET rating=85, updated_at=?1 WHERE id=?2",
+            params![date_ts("2026-06-20", 0), eid],
+        )
+        .unwrap();
         insert_action(
             &conn,
             film_ids[0],
-            date_ts("2026-06-20", 0),
-            "standalone",
-            None,
+            date_ts("2026-06-20", 0) + 60,
+            "edit",
+            Some(&eid),
             json!({"my_rating": [88, 85]}),
         );
     }

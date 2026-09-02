@@ -91,6 +91,7 @@ export default function ConfirmCard({
   const action = pending.args?.action as string | undefined;
   const isDiary = pending.name === "manage_diary";
   const isReview = pending.name === "manage_reviews";
+  const isState = pending.name === "set_movie_state";
   const isSqCreate =
     pending.name === "manage_saved_queries" && action === "create";
   const isDelete = action === "delete";
@@ -332,6 +333,30 @@ export default function ConfirmCard({
             onClick={confirm}
           >
             确认保存
+          </button>
+          <button className="rounded border border-[#456] px-3 py-1.5 text-sm" onClick={reject}>
+            拒绝
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== set_movie_state：仅想看切换（架构收敛后唯一字段） =====
+  if (isState) {
+    const on = pending.args?.in_watchlist === true;
+    return (
+      <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
+        <p className="mb-3 text-sm font-medium text-[#ff8000]">✎ 待确认 · 修改想看状态</p>
+        <p className="text-sm text-[#dfe7ef]">
+          {String(pending.args?.movie_id ?? "")} → 想看：{on ? "加入想看" : "移出想看"}
+        </p>
+        <div className="mt-3 flex gap-2">
+          <button
+            className="rounded bg-[#00e054] px-3 py-1.5 text-sm font-medium text-[#0c1a10]"
+            onClick={confirm}
+          >
+            确认执行
           </button>
           <button className="rounded border border-[#456] px-3 py-1.5 text-sm" onClick={reject}>
             拒绝
