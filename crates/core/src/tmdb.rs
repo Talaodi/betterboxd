@@ -87,10 +87,11 @@ impl TmdbClient {
         Ok(body)
     }
 
-    /// 搜索影片：返回前 5 条 {tmdb_id, title, original_title, year, overview, poster_path}
-    pub async fn search_movie(&self, query: &str, year: Option<i64>) -> Result<Vec<Value>, String> {
+    /// 搜索影片：返回指定页的前 5 条 {tmdb_id, title, original_title, year, overview, poster_path}。
+    /// page 从 1 起；TMDB 每页 20 条，本函数固定取每页前 5 条（前端「更多」= page+1）。
+    pub async fn search_movie(&self, query: &str, year: Option<i64>, page: u32) -> Result<Vec<Value>, String> {
         let q = urlencode(query);
-        let mut query_str = format!("query={q}&include_adult=false");
+        let mut query_str = format!("query={q}&include_adult=false&page={page}");
         if let Some(y) = year {
             query_str.push_str(&format!("&primary_release_year={y}"));
         }

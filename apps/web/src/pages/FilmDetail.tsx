@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import DiaryEntryRow from "../components/DiaryEntryRow";
@@ -44,9 +44,9 @@ export default function FilmDetail() {
   };
   useEffect(load, [id]);
 
-  const setWatchlist = async (v: boolean) => {
+  const setState = async (patch: Record<string, unknown>) => {
     try {
-      await sendJson(`/api/movie/${id}/state`, "POST", { in_watchlist: v });
+      await sendJson(`/api/movie/${id}/state`, "POST", patch);
       load();
     } catch (e) {
       alert(`状态修改失败: ${(e as Error).message}`);
@@ -157,19 +157,21 @@ export default function FilmDetail() {
             <button
               className={"flex flex-col items-center text-xs " +
                 (m.in_watchlist ? "text-[#ff8000]" : "text-[#8899aa]")}
-              onClick={() => setWatchlist(!m.in_watchlist)}
+              onClick={() => setState({ in_watchlist: !m.in_watchlist })}
             >
               <span className="text-xl">🔖</span>
               想看
             </button>
-            <span
+            <button
               className={"flex flex-col items-center text-xs " +
-                (m.liked ? "text-[#00e054]" : "text-[#8899aa]")}
-              title="喜欢通过记一笔或影评产生"
+                (m.liked ? "text-[#00e054]" : m.watched ? "text-[#8899aa]" : "text-[#3a4653]")}
+              onClick={() => m.watched && setState({ liked: !m.liked })}
+              disabled={!m.watched}
+              title={m.watched ? (m.liked ? "取消喜欢" : "喜欢") : "先记一笔或写影评才能点喜欢"}
             >
               <span className="text-xl">{m.liked ? "♥" : "♡"}</span>
               喜欢
-            </span>
+            </button>
           </div>
           <div className="border-t border-[#2c3440] pt-3">
             <p className="mb-1 text-center text-xs text-[#8899aa]">Rate</p>
@@ -177,7 +179,7 @@ export default function FilmDetail() {
               <StarsDisplay value={m.my_rating} />
             </div>
             <p className="mt-1 text-center text-[10px] leading-4 text-[#5a6b7c]">
-              评分通过记一笔或影评修改
+              评分绑定署名日期最靠后的有分记录
             </p>
           </div>
           <div className="mt-3 space-y-2 border-t border-[#2c3440] pt-3">
@@ -203,24 +205,31 @@ export default function FilmDetail() {
         </div>
       </div>
 
-      {/* List 归属区：徽章流 + 加入清单下拉 */}
-      <div className="mt-6 flex flex-wrap items-center gap-2 text-xs">
-        {detail.lists.map((l) => (
-          <span
-            key={l.list_id}
-            className={
-              "rounded px-2 py-1 " +
-              (l.ranked && l.rank
-                ? "bg-[#ff8000]/15 text-[#ff8000]"
-                : "bg-[#2c3440] text-[#c8d2dc]")
-            }
-          >
-            {l.ranked && l.rank ? `No.${l.rank} in ${l.name}` : `in ${l.name}`}
-          </span>
-        ))}
-        <span className="relative">
+      {/* List 归属区：竖排卡片（与 Log 板块同构）+ 加入清单下拉 */}
+      <div className="mt-8">
+        <p className="mb-1.5 px-2 text-xs font-medium tracking-widest text-[#5a6b7c]">LISTS</p>
+        <div className="border-t border-[#2c3440]">
+          {detail.lists.map((l) => (
+            <Link
+              key={l.list_id}
+              to={`/lists`}
+              className="flex items-baseline gap-3 border-b border-[#1e2630] px-2 py-2 hover:bg-[#1b222b]"
+            >
+              <span
+                className={
+                  "w-24 shrink-0 text-right text-sm font-bold " +
+                  (l.ranked && l.rank ? "text-[#ff8000]" : "text-[#8899aa]")
+                }
+              >
+                {l.ranked && l.rank ? `No.${l.rank} in` : "In"}
+              </span>
+              <span className="truncate text-sm text-[#c8d2dc]">{l.name}</span>
+            </Link>
+          ))}
+        </div>
+        <span className="relative mt-2 inline-block">
           <button
-            className="rounded border border-[#456] px-2 py-1 text-[#8899aa] hover:text-white"
+            className="rounded border border-[#456] px-2 py-1 text-xs text-[#8899aa] hover:text-white"
             onClick={openListPicker}
           >
             + 加入 List
@@ -373,7 +382,8 @@ function LogSection({
           {isCollapsed ? "展开 ▼" : "收起 ▲"}
         </span>
       </button>
-      {!isCollapsed && children}
+      {/* 空板块不渲染内容（无竖线），与收起后一致 */}
+      {!isCollapsed && count > 0 && children}
     </div>
   );
 }
@@ -394,7 +404,6 @@ function DiaryModal({
   const [rating, setRating] = useState<number | null>(null);
   const [theater, setTheater] = useState(false);
   const [price, setPrice] = useState("");
-  const [liked, setLiked] = useState(false);
   const [note, setNote] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [dims, setDims] = useState<Record<string, string>>({});
@@ -414,7 +423,6 @@ function DiaryModal({
         watched_date: date,
         rating,
         in_theater: theater,
-        liked,
         ticket_price_cents: price === "" ? null : Math.round(Number(price) * 100),
         note,
         dimensions,
@@ -456,10 +464,6 @@ function DiaryModal({
                 />
               </span>
             )}
-            <span className="flex items-center gap-1">
-              <input type="checkbox" checked={liked} onChange={(e) => setLiked(e.target.checked)} />
-              喜欢
-            </span>
           </label>
           <textarea
             rows={3}
@@ -523,7 +527,7 @@ function ReviewModal({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [rating, setRating] = useState<number | null>(null);
-  const [liked, setLiked] = useState(false);
+  const [sigDate, setSigDate] = useState("");
   const [err, setErr] = useState("");
 
   const submit = async () => {
@@ -534,7 +538,7 @@ function ReviewModal({
         title,
         body_md: body,
         rating,
-        liked,
+        signature_date: sigDate || null,
       });
       onSaved();
       onClose();
@@ -556,9 +560,14 @@ function ReviewModal({
             onChange={(e) => setTitle(e.target.value)}
           />
           <StarsEditor value={rating} onChange={setRating} />
-          <label className="flex items-center gap-1 text-sm">
-            <input type="checkbox" checked={liked} onChange={(e) => setLiked(e.target.checked)} />
-            喜欢
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-[#8899aa]">署名日期（缺省=创建日期）</span>
+            <input
+              type="date"
+              className="rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm"
+              value={sigDate}
+              onChange={(e) => setSigDate(e.target.value)}
+            />
           </label>
           <textarea
             rows={8}

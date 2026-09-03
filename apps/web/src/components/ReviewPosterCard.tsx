@@ -15,6 +15,8 @@ export type ReviewCardData = {
   rating: number | null;
   liked: number;
   created_at: number | null;
+  /** 署名日期（终态评分绑定；缺省显示创建日期） */
+  signature_date?: string | null;
 };
 
 export default function ReviewPosterCard({
@@ -41,9 +43,11 @@ export default function ReviewPosterCard({
     const el = measureRef.current;
     if (el) setOverflow(el.scrollHeight > POSTER_H - 30 + 2);
   }, [review.body_md]);
-  const date = review.created_at
-    ? new Date(review.created_at * 1000).toISOString().slice(0, 10)
-    : null;
+  const date =
+    review.signature_date ??
+    (review.created_at
+      ? new Date(review.created_at * 1000).toISOString().slice(0, 10)
+      : null);
 
   return (
     <article className="overflow-hidden rounded-lg border border-[#2c3440] bg-[#1b222b]">

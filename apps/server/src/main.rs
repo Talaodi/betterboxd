@@ -238,7 +238,7 @@ async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Respon
     let reviews = app
         .db
         .select_json(&format!(
-            "SELECT review_id, title, body_md, rating, liked, created_at
+            "SELECT review_id, title, body_md, rating, liked, created_at, signature_date
              FROM v_reviews_full WHERE movie_id={id}"
         ))
         .await
@@ -291,12 +291,12 @@ async fn movie_state(
     AxPath(id): AxPath<i64>,
     Json(args): Json<serde_json::Value>,
 ) -> Response {
-    // 架构收敛：评分/喜欢唯一断言源 = Diary/Review，REST 也不放行
-    for banned in ["my_rating", "liked", "clear_my_rating"] {
+    // 评分只能经 Diary/Review（署名日期绑定）；like 走本端点（影片级状态量）
+    for banned in ["my_rating", "clear_my_rating"] {
         if args.get(banned).is_some() {
             return (
                 StatusCode::BAD_REQUEST,
-                "评分/喜欢只能通过记一笔（Diary）或影评（Review）修改",
+                "评分只能通过记一笔（Diary）或影评（Review）修改",
             )
                 .into_response();
         }
@@ -397,7 +397,7 @@ async fn reviews_list(State(app): State<App>) -> Response {
         .db
         .select_json(
             "SELECT review_id, movie_id, title, body_md, rating, liked, created_at,
-                    title_zh, title_original AS title_sub, my_rating
+                    signature_date, title_zh, title_original AS title_sub, my_rating
              FROM v_reviews_full ORDER BY created_at DESC LIMIT 200",
         )
         .await
@@ -446,7 +446,9 @@ async fn lists_list(State(app): State<App>) -> Response {
         .db
         .select_json(
             "SELECT l.id, l.name, l.description, l.source, l.ranked, l.created_at, l.updated_at,
-                    (SELECT COUNT(*) FROM list_items li WHERE li.list_id = l.id) AS item_count
+                    (SELECT COUNT(*) FROM list_items li WHERE li.list_id = l.id) AS item_count,
+                    (SELECT movie_id FROM list_items li WHERE li.list_id = l.id
+                      ORDER BY li.rank IS NULL, li.rank, li.added_at LIMIT 1) AS cover_movie_id
              FROM lists l ORDER BY l.updated_at DESC",
         )
         .await
@@ -491,33 +493,6 @@ async fn list_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Resp
     }
 }
 
-async fn movie_add_from_tmdb(
-    State(app): State<App>,
-    Json(args): Json<serde_json::Value>,
-) -> Response {
-    let Some(tmdb_id) = args["tmdb_id"].as_i64() else {
-        return (StatusCode::BAD_REQUEST, "缺少 tmdb_id").into_response();
-    };
-    // 建最小桩（若已存在则跳过），详情页懒拉取会补全
-    let r = app
-        .db
-        .call(move |c| {
-            c.execute(
-                "INSERT INTO movies (tmdb_id, updated_at) VALUES (?1,?2)
-                 ON CONFLICT(tmdb_id) DO NOTHING",
-                rusqlite::params![tmdb_id, betterboxd_core::now()],
-            )?;
-            Ok(())
-        })
-        .await;
-    if let Err(e) = r {
-        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
-    // 尽力拉详情（TMDB 宕机不阻塞——桩已建，详情页可再试）
-    let _ = betterboxd_core::tools::ensure_movie_details(&app.tmdb, &app.db, tmdb_id).await;
-    Json(json!({"ok": true, "tmdb_id": tmdb_id})).into_response()
-}
-
 async fn review_get(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
     if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return (StatusCode::BAD_REQUEST, "非法影评 ID").into_response();
@@ -525,7 +500,8 @@ async fn review_get(State(app): State<App>, AxPath(id): AxPath<String>) -> Respo
     match app
         .db
         .select_json_params(
-            "SELECT review_id, movie_id, title, body_md, rating, liked, created_at, updated_at
+            "SELECT review_id, movie_id, title, body_md, rating, liked, created_at, updated_at,
+                    signature_date
              FROM v_reviews_full WHERE review_id=?1"
                 .into(),
             vec![betterboxd_core::db::SqlVal::Text(id)],
@@ -659,10 +635,11 @@ async fn tmdb_search(
         return (StatusCode::BAD_REQUEST, "缺少 q 参数").into_response();
     };
     let year = q.get("year").and_then(|s| s.parse::<i64>().ok());
+    let page = q.get("page").and_then(|s| s.parse::<i64>().ok()).unwrap_or(1);
     match tools::execute(
         "search_movies",
         &tool_ctx(&app),
-        json!({"query": query, "year": year}),
+        json!({"query": query, "year": year, "page": page}),
     )
     .await
     {
@@ -1365,7 +1342,6 @@ async fn main() {
             "/api/lists/{id}/items/{movie_id}",
             put(list_item_rank).delete(list_item_remove),
         )
-        .route("/api/movies/add_from_tmdb", post(movie_add_from_tmdb))
         .route("/api/reviews/{id}", get(review_get))
         .route("/api/config", get(config_get).post(config_save))
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))

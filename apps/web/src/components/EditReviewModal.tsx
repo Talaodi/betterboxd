@@ -1,4 +1,5 @@
-/** Review 编辑弹窗（P2）：GET 回填 → title/body/rating/liked 可编辑 → PUT。 */
+/** Review 编辑弹窗：GET 回填 → title/body/rating/署名日期 可编辑 → PUT。
+ *  终态评分改由署名日期绑定（缺省回退创建日期），无覆盖警告概念。 */
 import { useEffect, useState } from "react";
 import { getJson, sendJson } from "../api";
 import { StarsEditor } from "./Stars";
@@ -8,7 +9,7 @@ type ReviewFull = {
   title: string | null;
   body_md: string;
   rating: number | null;
-  liked: number;
+  signature_date: string | null;
 };
 
 export default function EditReviewModal({
@@ -23,7 +24,7 @@ export default function EditReviewModal({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [rating, setRating] = useState<number | null>(null);
-  const [liked, setLiked] = useState(false);
+  const [sigDate, setSigDate] = useState("");
   const [ready, setReady] = useState(false);
   const [err, setErr] = useState("");
 
@@ -33,34 +34,20 @@ export default function EditReviewModal({
         setTitle(d.review.title ?? "");
         setBody(d.review.body_md);
         setRating(d.review.rating);
-        setLiked(d.review.liked === 1);
+        setSigDate(d.review.signature_date ?? "");
         setReady(true);
       })
       .catch((e) => setErr(`回填失败: ${(e as Error).message}`));
   }, [reviewId]);
 
-  const submit = async (override: boolean) => {
+  const submit = async () => {
     try {
-      // 覆盖警告是 200 响应体，不是 HTTP 错误
-      const out = await sendJson<{ require_confirmation?: boolean }>(`/api/reviews/${reviewId}`, "PUT", {
+      await sendJson(`/api/reviews/${reviewId}`, "PUT", {
         title,
         body_md: body,
         rating,
-        liked,
-        ...(override ? { override_confirmed: true } : {}),
+        signature_date: sigDate || null,
       });
-      if (out?.require_confirmation && !override) {
-        if (
-          window.confirm(
-            "此修改将覆盖更新的最终评分/喜欢状态，确定覆盖？（账目保留历史）",
-          )
-        ) {
-          await submit(true);
-        } else {
-          setErr("已取消。如需保留最新评分，请勿修改评分/喜欢。");
-        }
-        return;
-      }
       onSaved();
       onClose();
     } catch (e) {
@@ -82,9 +69,14 @@ export default function EditReviewModal({
               onChange={(e) => setTitle(e.target.value)}
             />
             <StarsEditor value={rating} onChange={setRating} />
-            <label className="flex items-center gap-1 text-sm">
-              <input type="checkbox" checked={liked} onChange={(e) => setLiked(e.target.checked)} />
-              喜欢
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-[#8899aa]">署名日期（终态评分绑定此日期，缺省=创建日期）</span>
+              <input
+                type="date"
+                className="rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm"
+                value={sigDate}
+                onChange={(e) => setSigDate(e.target.value)}
+              />
             </label>
             <textarea
               rows={8}
@@ -104,7 +96,7 @@ export default function EditReviewModal({
           <button
             className="rounded bg-[#00e054] px-4 py-1.5 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
             disabled={!ready}
-            onClick={() => submit(false)}
+            onClick={submit}
           >
             保存
           </button>

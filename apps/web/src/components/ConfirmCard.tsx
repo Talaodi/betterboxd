@@ -1,7 +1,7 @@
 /** 可编辑确认卡（评审缺陷 2/16 重写）：
  *  - manage_diary add    → DiaryForm（args 初始化）
  *  - manage_diary update → 按 entry_id 拉取当前条目回填表单，确认时只提交 diff
- *  - manage_reviews      → 专用面板（title/body/rating/liked 可编辑，不再是 DiaryForm）
+ *  - manage_reviews      → 专用面板（title/body/rating/署名日期 可编辑，不再是 DiaryForm）
  *  - 任意 delete         → 简单确认文案（删除语义不渲染编辑表单）
  *  - manage_saved_queries create → 名称可编辑 + SQL 只读 */
 import { useEffect, useState } from "react";
@@ -44,7 +44,6 @@ function diaryFormFromEntry(e: EntryRow): DiaryFormData {
     watched_date: e.watched_date,
     rating: e.rating,
     in_theater: e.in_theater === 1,
-    liked: e.liked === 1,
     ticket_price_cents: e.ticket_price_cents,
     note: e.private_note,
     dimensions: dims,
@@ -58,7 +57,6 @@ function diffDiary(form: DiaryFormData, loaded: EntryRow): Record<string, unknow
   if (form.watched_date !== loaded.watched_date) patch.watched_date = form.watched_date;
   if (form.rating !== loaded.rating) patch.rating = form.rating; // null = 清除
   if (form.in_theater !== (loaded.in_theater === 1)) patch.in_theater = form.in_theater;
-  if (form.liked !== (loaded.liked === 1)) patch.liked = form.liked;
   if (form.ticket_price_cents !== loaded.ticket_price_cents)
     patch.ticket_price_cents = form.ticket_price_cents; // null = 清除
   if (form.note !== loaded.private_note) patch.note = form.note;
@@ -124,7 +122,6 @@ export default function ConfirmCard({
         if (a.watched_date !== undefined) fd.watched_date = String(a.watched_date);
         if (a.rating !== undefined) fd.rating = (a.rating as number | null) ?? null;
         if (a.in_theater !== undefined) fd.in_theater = a.in_theater === true;
-        if (a.liked !== undefined) fd.liked = a.liked === true;
         if (a.ticket_price_cents !== undefined)
           fd.ticket_price_cents = (a.ticket_price_cents as number | null) ?? null;
         if (a.note !== undefined) fd.note = String(a.note);
@@ -152,8 +149,8 @@ export default function ConfirmCard({
   const [revRating, setRevRating] = useState<number | null>(() =>
     isReview ? ((pending.args?.rating as number | null) ?? null) : null,
   );
-  const [revLiked, setRevLiked] = useState(() =>
-    isReview ? (pending.args?.liked as boolean | undefined) === true : false,
+  const [revSigDate, setRevSigDate] = useState(() =>
+    isReview ? String(pending.args?.signature_date ?? "") : "",
   );
 
   // manage_saved_queries create：名称可编辑，SQL 只读
@@ -223,7 +220,7 @@ export default function ConfirmCard({
         title: revTitle,
         body_md: revBody,
         rating: revRating,
-        liked: revLiked,
+        signature_date: revSigDate || null,
         override_confirmed: true,
       });
     } else if (isSqCreate) {
@@ -336,13 +333,14 @@ export default function ConfirmCard({
             onChange={(e) => setRevTitle(e.target.value)}
           />
           <StarsEditor value={revRating} onChange={setRevRating} />
-          <label className="flex items-center gap-1 text-sm">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-[#8899aa]">署名日期（终态评分绑定此日期，缺省=创建日期）</span>
             <input
-              type="checkbox"
-              checked={revLiked}
-              onChange={(e) => setRevLiked(e.target.checked)}
+              type="date"
+              className="rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm"
+              value={revSigDate}
+              onChange={(e) => setRevSigDate(e.target.value)}
             />
-            喜欢
           </label>
           <textarea
             rows={6}

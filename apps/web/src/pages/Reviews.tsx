@@ -12,6 +12,7 @@ type ReviewRow = {
   rating: number | null;
   liked: number;
   created_at: number;
+  signature_date: string | null;
   title_zh: string;
   title_sub: string;
   my_rating: number | null;
@@ -61,6 +62,7 @@ export default function Reviews() {
               rating: r.rating,
               liked: r.liked,
               created_at: r.created_at,
+              signature_date: r.signature_date,
             }}
             movieId={r.movie_id}
             movieTitle={r.title_zh}

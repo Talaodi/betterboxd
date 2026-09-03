@@ -10,11 +10,11 @@ import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
 
 const NAV = [
+  { to: "/search", label: "Search", icon: "🔍" },
   { to: "/chats", label: "Chats", icon: "🗂" },
   { to: "/diary", label: "Diary", icon: "📔" },
   { to: "/reviews", label: "Reviews", icon: "✍" },
   { to: "/films", label: "Films", icon: "🎞" },
-  { to: "/search", label: "Search", icon: "🔍" },
   { to: "/lists", label: "Lists", icon: "📋" },
   { to: "/stats", label: "Stats", icon: "📊" },
 ];

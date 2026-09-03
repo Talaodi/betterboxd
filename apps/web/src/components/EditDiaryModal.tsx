@@ -1,5 +1,5 @@
-/** Diary 编辑弹窗（P2）：GET 回填条目现状 → DiaryForm 可编辑 → PUT 全字段（presence 语义）。
- *  覆盖警告链路：响应 {require_confirmation:true} → confirm() → override_confirmed 重发一次。 */
+/** Diary 编辑弹窗：GET 回填条目现状 → DiaryForm 可编辑 → PUT 全字段（presence 语义）。
+ *  终态评分改由署名日期（=观看日期）绑定，无覆盖警告概念。 */
 import { useEffect, useState } from "react";
 import { getJson, parseJsonArray, sendJson } from "../api";
 import { DiaryForm, type DiaryFormData } from "./DiaryForm";
@@ -8,7 +8,6 @@ type EntryFull = {
   entry_id: string;
   watched_date: string;
   rating: number | null;
-  liked: number;
   in_theater: number;
   ticket_price_cents: number | null;
   private_note: string;
@@ -28,7 +27,6 @@ function entryToForm(e: EntryFull): DiaryFormData {
     watched_date: e.watched_date,
     rating: e.rating,
     in_theater: e.in_theater === 1,
-    liked: e.liked === 1,
     ticket_price_cents: e.ticket_price_cents,
     note: e.private_note,
     dimensions: dims,
@@ -55,26 +53,10 @@ export default function EditDiaryModal({
       .catch((e) => setErr(`回填失败: ${(e as Error).message}`));
   }, [entryId]);
 
-  const submit = async (override: boolean) => {
+  const submit = async () => {
     if (!data) return;
     try {
-      // 注意：覆盖警告是 200 响应体（{require_confirmation:true}），不是 HTTP 错误
-      const out = await sendJson<{ require_confirmation?: boolean }>(`/api/diary/${entryId}`, "PUT", {
-        ...data,
-        ...(override ? { override_confirmed: true } : {}),
-      });
-      if (out?.require_confirmation && !override) {
-        if (
-          window.confirm(
-            "此修改将覆盖更新的最终评分/喜欢状态，确定覆盖？（账目保留历史）",
-          )
-        ) {
-          await submit(true);
-        } else {
-          setErr("已取消。如需保留最新评分，请勿修改评分字段。");
-        }
-        return;
-      }
+      await sendJson(`/api/diary/${entryId}`, "PUT", data);
       onSaved();
       onClose();
     } catch (e) {
@@ -104,7 +86,7 @@ export default function EditDiaryModal({
           <button
             className="rounded bg-[#00e054] px-4 py-1.5 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
             disabled={!data}
-            onClick={() => submit(false)}
+            onClick={submit}
           >
             保存
           </button>

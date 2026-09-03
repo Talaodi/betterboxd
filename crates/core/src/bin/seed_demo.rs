@@ -534,7 +534,7 @@ async fn main() {
     println!("拉取 {} 部影片元数据（250ms 限速）…", FILMS.len());
     let mut film_ids: Vec<i64> = vec![0; FILMS.len()];
     for (i, (title, year, watchlist)) in FILMS.iter().enumerate() {
-        let results = match tmdb.search_movie(title, Some(*year)).await {
+        let results = match tmdb.search_movie(title, Some(*year), 1).await {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("  ⚠ {title} 搜索失败: {e}");

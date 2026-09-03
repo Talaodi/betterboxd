@@ -169,21 +169,20 @@ pub fn registry() -> ToolRegistry {
             },
             ToolMeta {
                 name: "manage_diary",
-                description: "添加/修改/删除观影记录。add 需 movie_id（先 search_movies）；update 用 entry_id+变更字段；delete 用 entry_id。评分 0-100（半星=10分）。dimensions 形如 {\"地点\":[\"家\"],\"同伴\":[\"老张\"]}。修改旧条目评分若触发覆盖警告，需带 override_confirmed=true 并已获用户同意。",
+                description: "添加/修改/删除观影记录。add 需 movie_id（先 search_movies）；update 用 entry_id+变更字段；delete 用 entry_id。评分 0-100（半星=10分），最终评分绑定到观看日期最靠后的有分条目。dimensions 形如 {\"地点\":[\"家\"],\"同伴\":[\"老张\"]}。同片同日重复录入会先警告，确认仍要记录带 override_confirmed=true。",
                 parameters: obj_schema(
                     json!({
                         "action": {"type": "string", "enum": ["add", "update", "delete"]},
                         "movie_id": {"type": "integer"},
                         "entry_id": {"type": "string"},
-                        "watched_date": {"type": "string", "description": "YYYY-MM-DD"},
+                        "watched_date": {"type": "string", "description": "YYYY-MM-DD，即署名日期"},
                         "rating": {"type": "integer", "description": "0-100，可空=不打分"},
                         "in_theater": {"type": "boolean"},
-                        "liked": {"type": "boolean"},
                         "ticket_price_cents": {"type": "integer", "description": "人民币分"},
                         "dimensions": {"type": "object"},
                         "tags": {"type": "array", "items": {"type": "string"}},
                         "note": {"type": "string"},
-                        "override_confirmed": {"type": "boolean"}
+                        "override_confirmed": {"type": "boolean", "description": "仅用于确认同片同日重复记录"}
                     }),
                     &["action"],
                 ),
@@ -199,20 +198,21 @@ pub fn registry() -> ToolRegistry {
                         "title": {"type": "string"},
                         "body_md": {"type": "string", "description": "Markdown 正文"},
                         "rating": {"type": "integer"},
-                        "liked": {"type": "boolean"}
+                        "signature_date": {"type": "string", "description": "署名日期 YYYY-MM-DD，缺省=创建日期；最终评分绑定到署名日期最靠后的有分影评/条目"}
                     }),
                     &["action"],
                 ),
             },
             ToolMeta {
                 name: "set_movie_state",
-                description: "只管理想看（in_watchlist）。评分/喜欢必须通过 manage_diary 或 manage_reviews 产生（条目级），本工具不接受也不修改它们。清除影片评分/喜欢同样改对应条目。",
+                description: "影片级状态：in_watchlist 想看开关、liked 喜欢（仅能对看过即有观影记录/影评的影片点）。评分不在此产生——它绑定到署名日期最靠后且打了分的 Diary/Review。",
                 parameters: obj_schema(
                     json!({
                         "movie_id": {"type": "integer"},
-                        "in_watchlist": {"type": "boolean"}
+                        "in_watchlist": {"type": "boolean"},
+                        "liked": {"type": "boolean"}
                     }),
-                    &["movie_id", "in_watchlist"],
+                    &["movie_id"],
                 ),
             },
         ],
@@ -249,9 +249,10 @@ fn get_i64(v: &Value, k: &str) -> Option<i64> {
 async fn search_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let query = get_str(args, "query").ok_or("缺少 query")?;
     let year = get_i64(args, "year");
+    let page = get_i64(args, "page").unwrap_or(1).clamp(1, 100) as u32;
     let results = ctx
         .tmdb
-        .search_movie(query, year)
+        .search_movie(query, year, page)
         .await
         .map_err(|e| e.to_string())?;
     // 以搜索级字段建/更新条目桩（fetched_at=NULL 表示详情未拉取）
@@ -849,6 +850,13 @@ fn get_bool(v: &Value, k: &str) -> Option<bool> {
     v.get(k).and_then(|x| x.as_bool())
 }
 
+/// 署名日期校验：YYYY-MM-DD（chrono 解析拒绝垃圾值）。
+fn validate_date_str(s: &str) -> Result<String, String> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map(|_| s.to_string())
+        .map_err(|_| format!("signature_date 需为 YYYY-MM-DD，收到: {s}"))
+}
+
 /// 评分校验：出现即必须在 0–100（静默丢弃会误导模型与用户）。
 fn validate_rating(raw: Option<i64>) -> Result<Option<i64>, String> {
     match raw {
@@ -994,39 +1002,6 @@ fn auto_clear_watchlist(conn: &Connection, movie_id: i64, at: i64) -> rusqlite::
     }
 }
 
-/// 旧断言覆盖检查：ref 的字段断言是否早于本影片该字段最新断言。
-/// (at, rowid) 字典序判定先后（同秒按插入序）。
-fn is_stale(conn: &Connection, movie_id: i64, ref_id: &str, field: &str) -> bool {
-    let own: Option<(i64, i64)> = conn
-        .query_row(
-            &format!(
-                "SELECT at, rowid FROM actions WHERE movie_id=?1 AND target='movie'
-                 AND source IN ('edit','agent','standalone') AND ref_id=?2
-                 AND json_extract(changes_json,'$.{field}[1]') IS NOT NULL
-                 ORDER BY at DESC, rowid DESC LIMIT 1"
-            ),
-            params![movie_id, ref_id],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
-        )
-        .ok();
-    let latest: Option<(i64, i64)> = conn
-        .query_row(
-            &format!(
-                "SELECT at, rowid FROM actions WHERE movie_id=?1 AND target='movie'
-                 AND source IN ('edit','agent','standalone')
-                 AND json_extract(changes_json,'$.{field}[1]') IS NOT NULL
-                 ORDER BY at DESC, rowid DESC LIMIT 1"
-            ),
-            params![movie_id],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
-        )
-        .ok();
-    match (own, latest) {
-        (Some(o), Some(l)) => o < l,
-        _ => false,
-    }
-}
-
 async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let action = get_str(args, "action").ok_or("缺少 action")?;
     match action {
@@ -1067,7 +1042,6 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                 .to_string();
             let rating = validate_rating(get_i64(&args, "rating"))?;
             let in_theater = get_bool(&args, "in_theater").unwrap_or(false);
-            let liked = get_bool(&args, "liked").unwrap_or(false);
             let price = get_i64(&args, "ticket_price_cents");
             let note = get_str(&args, "note").unwrap_or("").to_string();
             let entry_id = uuid::Uuid::now_v7().to_string();
@@ -1080,20 +1054,17 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                     tx.execute(
                         "INSERT INTO diary_entries (id, movie_id, watched_date, rating,
                            in_theater, liked, ticket_price_cents, private_note, created_at, updated_at)
-                         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)",
+                         VALUES (?1,?2,?3,?4,?5,0,?6,?7,?8,?8)",
                         params![entry_id, movie_id, watched_date, rating,
-                                in_theater as i64, liked as i64, price, note, at],
+                                in_theater as i64, price, note, at],
                     )?;
                     ensure_dims(&tx, &entry_id, args.get("dimensions").unwrap_or(&Value::Null))?;
                     ensure_tag_list(&tx, &entry_id, args.get("tags").unwrap_or(&Value::Null))?;
                     let mut notes = Vec::new();
                     if let Some(r) = rating {
+                        // 审计断言；终态拾取已改为署名日期 argmax
                         assert_and_recompute(&tx, movie_id, at, src, Some(&entry_id),
                                              "my_rating", r)?;
-                    }
-                    if liked {
-                        assert_and_recompute(&tx, movie_id, at, src, Some(&entry_id),
-                                             "liked", 1)?;
                     }
                     if auto_clear_watchlist(&tx, movie_id, at)? {
                         notes.push("已从想看移除");
@@ -1110,7 +1081,6 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             let entry_id = get_str(&args, "entry_id")
                 .ok_or("缺少 entry_id")?
                 .to_string();
-            let override_confirmed = get_bool(&args, "override_confirmed").unwrap_or(false);
             let src = ctx.source;
             ctx.db
                 .call(move |c| {
@@ -1127,7 +1097,7 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                             },
                         )
                         .map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
-                    let (old_date, old_rating, old_theater, old_liked, old_price, old_note) = old;
+                    let (old_date, old_rating, old_theater, _old_liked, old_price, old_note) = old;
 
                     // presence 语义（缺陷 2/15）：键出现即显式设置；rating/ticket_price
                     // 传 null = 清除；键缺失 = 保持。ConfirmCard 只提交用户改过的字段。
@@ -1168,11 +1138,6 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                         Patch::Clear => false,
                         Patch::Set(b) => b,
                     } as i64;
-                    let new_liked = match patch_bool("liked") {
-                        Patch::Unchanged => old_liked,
-                        Patch::Clear => 0,
-                        Patch::Set(b) => b as i64,
-                    };
                     let new_price = match patch_i64("ticket_price_cents") {
                         Patch::Unchanged => old_price,
                         Patch::Clear => None,
@@ -1190,7 +1155,6 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                     if new_date != old_date { changes.insert("watched_date".into(), json!([old_date, new_date])); }
                     if new_rating != old_rating { changes.insert("rating".into(), json!([old_rating, new_rating])); }
                     if new_theater != old_theater { changes.insert("in_theater".into(), json!([old_theater != 0, new_theater != 0])); }
-                    if new_liked != old_liked { changes.insert("liked".into(), json!([old_liked != 0, new_liked != 0])); }
                     if new_price != old_price { changes.insert("ticket_price_cents".into(), json!([old_price, new_price])); }
                     if new_note != old_note { changes.insert("private_note".into(), json!([old_note, new_note])); }
                     if patch_dims.is_some() { changes.insert("dimensions".into(), json!([Value::Null, patch_dims])) ; }
@@ -1200,29 +1164,19 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                         return Ok(json!({"ok": true, "note": "无字段变化，未落账"}));
                     }
 
-                    // 覆盖警告：评分或点赞断言若早于本影片最新断言（首次返回警告）
-                    if !override_confirmed
-                        && ((new_rating != old_rating && is_stale(&tx, movie_id, &entry_id, "my_rating"))
-                            || (new_liked != old_liked && is_stale(&tx, movie_id, &entry_id, "liked")))
-                    {
-                        return Ok(json!({
-                            "warning": "此修改将覆盖更新的最终状态",
-                            "require_confirmation": true
-                        }));
-                    }
-
                     let at = crate::now();
                     tx.execute(
                         "INSERT INTO actions (id, movie_id, target, target_id, at, source, ref_id, changes_json)
                          VALUES (?1,?2,'diary_entry',?3,?4,'agent',?3,?5)",
                         params![uuid::Uuid::now_v7().to_string(), movie_id, entry_id, at,
                                 Value::Object(changes.clone()).to_string()])?;
+                    // like 已状态量化（影片级详情页唯一入口），条目 liked 列不再更新
                     tx.execute(
                         "UPDATE diary_entries SET watched_date=?2, rating=?3, in_theater=?4,
-                           liked=?5, ticket_price_cents=?6, private_note=?7, updated_at=?8
+                           ticket_price_cents=?5, private_note=?6, updated_at=?7
                          WHERE id=?1",
                         params![entry_id, new_date, new_rating, new_theater,
-                                new_liked, new_price, new_note, at])?;
+                                new_price, new_note, at])?;
                     if let Some(d) = &patch_dims {
                         tx.execute("DELETE FROM entry_dimensions WHERE entry_id=?1", params![entry_id])?;
                         ensure_dims(&tx, &entry_id, d)?;
@@ -1231,25 +1185,11 @@ async fn manage_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                         tx.execute("DELETE FROM entry_tags WHERE entry_id=?1", params![entry_id])?;
                         ensure_tag_list(&tx, &entry_id, t)?;
                     }
-                    if new_rating != old_rating {
-                        match new_rating {
-                            Some(r) => assert_and_recompute(&tx, movie_id, at, src,
-                                Some(&entry_id), "my_rating", r)?,
-                            None => {
-                                // 条目评分清除 = 显式 Clear 断言（缺陷 15）；条目删除时随 ref 撤销
-                                let changes =
-                                    json!({"my_rating": [old_rating, Value::Null]}).to_string();
-                                tx.execute(
-                                    "INSERT INTO actions (id, movie_id, target, target_id, at, source, ref_id, changes_json)
-                                     VALUES (?1,?2,'movie',?2,?3,?4,?5,?6)",
-                                    params![uuid::Uuid::now_v7().to_string(), movie_id, at,
-                                            src, entry_id, changes])?;
-                            }
-                        }
-                    }
-                    if new_liked != old_liked {
-                        assert_and_recompute(&tx, movie_id, at, src, Some(&entry_id),
-                                             "liked", new_liked)?;
+                    // 审计：评分变化仍落 movie 级断言（重算已改为署名日期 argmax，
+                    // 断言仅作账目记录，不参与终态拾取）。清除走行级 null → argmax 自然回退。
+                    if let Some(r) = new_rating.filter(|_| new_rating != old_rating) {
+                        assert_and_recompute(&tx, movie_id, at, src,
+                            Some(&entry_id), "my_rating", r)?;
                     }
                     recompute_movie_state(&tx, movie_id)?;
                     tx.commit()?;
@@ -1296,7 +1236,13 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             let title = get_str(&args, "title").map(String::from);
             let body_md = get_str(&args, "body_md").ok_or("缺少 body_md")?.to_string();
             let rating = validate_rating(get_i64(&args, "rating"))?;
-            let liked = get_bool(&args, "liked").unwrap_or(false);
+            let signature_date = match args.get("signature_date") {
+                Some(Value::String(sv)) if !sv.is_empty() => match validate_date_str(sv) {
+                    Ok(d) => Some(d),
+                    Err(e) => return Err(e),
+                },
+                _ => None,
+            };
             let rid = uuid::Uuid::now_v7().to_string();
             let rid_reply = rid.clone();
             let at = crate::now();
@@ -1304,18 +1250,16 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             ctx.db
                 .call(move |c| {
                     let tx = c.unchecked_transaction()?;
+                    // like 已状态量化（影片级），影评不再携带 liked
                     tx.execute(
-                        "INSERT INTO reviews (id, movie_id, title, body_md, rating, liked, created_at, updated_at)
-                         VALUES (?1,?2,?3,?4,?5,?6,?7,?7)",
-                        params![rid, movie_id, title, body_md, rating, liked as i64, at],
+                        "INSERT INTO reviews (id, movie_id, title, body_md, rating, liked, signature_date, created_at, updated_at)
+                         VALUES (?1,?2,?3,?4,?5,0,?6,?7,?7)",
+                        params![rid, movie_id, title, body_md, rating, signature_date, at],
                     )?;
                     if let Some(r) = rating {
+                        // 审计断言（终态拾取已改为署名日期 argmax）
                         assert_and_recompute(&tx, movie_id, at, src, Some(&rid),
                                              "my_rating", r)?;
-                    }
-                    if liked {
-                        assert_and_recompute(&tx, movie_id, at, src, Some(&rid),
-                                             "liked", 1)?;
                     }
                     let cleared = auto_clear_watchlist(&tx, movie_id, at)?;
                     recompute_movie_state(&tx, movie_id)?;
@@ -1335,9 +1279,9 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             ctx.db
                 .call(move |c| {
                     let tx = c.unchecked_transaction()?;
-                    let (movie_id, old_title, old_body, old_rating, old_liked): (
-                        i64, Option<String>, String, Option<i64>, i64) = tx.query_row(
-                        "SELECT movie_id, title, body_md, rating, liked FROM reviews WHERE id=?1",
+                    let (movie_id, old_title, old_body, old_rating, old_sig): (
+                        i64, Option<String>, String, Option<i64>, Option<String>) = tx.query_row(
+                        "SELECT movie_id, title, body_md, rating, signature_date FROM reviews WHERE id=?1",
                         params![review_id], |r| {
                             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
                         })
@@ -1361,32 +1305,27 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                             Err(e) => return Err(rusqlite::Error::InvalidParameterName(e)),
                         },
                     };
-                    let new_liked = match args.get("liked") {
-                        None => old_liked,
-                        Some(Value::Null) => 0,
-                        Some(v) => v.as_bool().map(|b| b as i64).unwrap_or(old_liked),
+                    // presence：键缺失 = 保持；显式 null = 清除（终态回退创建日期）
+                    let new_sig = match args.get("signature_date") {
+                        None => old_sig.clone(),
+                        Some(Value::Null) => None,
+                        Some(v) => match v.as_str() {
+                            Some("") | None => None,
+                            Some(sv) => match validate_date_str(sv) {
+                                Ok(d) => Some(d),
+                                Err(e) => return Err(rusqlite::Error::InvalidParameterName(e)),
+                            },
+                        },
                     };
                     let _ = rating_req;
                     let mut changes = serde_json::Map::new();
                     if new_title != old_title { changes.insert("title".into(), json!([old_title, new_title])); }
                     if new_body != old_body { changes.insert("body_md".into(), json!([old_body, new_body])); }
                     if new_rating != old_rating { changes.insert("rating".into(), json!([old_rating, new_rating])); }
-                    if new_liked != old_liked { changes.insert("liked".into(), json!([old_liked != 0, new_liked != 0])); }
+                    if new_sig != old_sig { changes.insert("signature_date".into(), json!([old_sig, new_sig])); }
                     if changes.is_empty() {
                         tx.commit()?;
                         return Ok(json!({"ok": true, "note": "无字段变化"}));
-                    }
-                    if (new_rating != old_rating
-                            && is_stale(&tx, movie_id, &review_id, "my_rating")
-                            && !get_bool(&args, "override_confirmed").unwrap_or(false))
-                        || (new_liked != old_liked
-                            && is_stale(&tx, movie_id, &review_id, "liked")
-                            && !get_bool(&args, "override_confirmed").unwrap_or(false))
-                    {
-                        return Ok(json!({
-                            "warning": "此修改将覆盖更新的最终状态",
-                            "require_confirmation": true
-                        }));
                     }
                     let at = crate::now();
                     tx.execute(
@@ -1396,26 +1335,14 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                         params![uuid::Uuid::now_v7().to_string(), movie_id, review_id, at,
                                 Value::Object(changes.clone()).to_string()])?;
                     tx.execute(
-                        "UPDATE reviews SET title=?2, body_md=?3, rating=?4, liked=?5, updated_at=?6 WHERE id=?1",
-                        params![review_id, new_title, new_body, new_rating, new_liked, at])?;
+                        "UPDATE reviews SET title=?2, body_md=?3, rating=?4, signature_date=?5, updated_at=?6 WHERE id=?1",
+                        params![review_id, new_title, new_body, new_rating, new_sig, at])?;
                     if new_rating != old_rating {
-                        match new_rating {
-                            Some(r) => assert_and_recompute(&tx, movie_id, at, src,
-                                Some(&review_id), "my_rating", r)?,
-                            None => {
-                                let changes =
-                                    json!({"my_rating": [old_rating, Value::Null]}).to_string();
-                                tx.execute(
-                                    "INSERT INTO actions (id, movie_id, target, target_id, at, source, ref_id, changes_json)
-                                     VALUES (?1,?2,'movie',?2,?3,?4,?5,?6)",
-                                    params![uuid::Uuid::now_v7().to_string(), movie_id, at,
-                                            src, review_id, changes])?;
-                            }
+                        // 审计断言；清除走行级 null → argmax 自然回退
+                        if let Some(r) = new_rating {
+                            assert_and_recompute(&tx, movie_id, at, src,
+                                Some(&review_id), "my_rating", r)?;
                         }
-                    }
-                    if new_liked != old_liked {
-                        assert_and_recompute(&tx, movie_id, at, src, Some(&review_id),
-                                             "liked", new_liked)?;
                     }
                     recompute_movie_state(&tx, movie_id)?;
                     tx.commit()?;
@@ -1455,33 +1382,49 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
 async fn set_movie_state(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let args = confirmed_args(ctx, "set_movie_state", args.clone()).await?;
     let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
-    // 架构收敛：rating/liked 断言唯一源 = Diary/Review。越权字段显式拒绝（防旧提示词残留路径）。
-    for banned in ["my_rating", "liked", "clear_my_rating"] {
+    // 评分只能由 Diary/Review 产生（署名日期绑定），越权字段显式拒绝（防旧提示词残留路径）。
+    for banned in ["my_rating", "clear_my_rating"] {
         if args.get(banned).is_some() {
             return Err(
-                "评分/喜欢只能通过 manage_diary 或 manage_reviews 产生，不能用 set_movie_state"
-                    .into(),
+                "评分只能通过 manage_diary 或 manage_reviews 产生，不能用 set_movie_state".into(),
             );
         }
     }
     let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
     let watchlist = get_bool(&args, "in_watchlist");
-    let Some(w) = watchlist else {
-        return Err("缺少 in_watchlist".into());
-    };
+    let liked = get_bool(&args, "liked");
+    if watchlist.is_none() && liked.is_none() {
+        return Err("至少提供一个字段（in_watchlist/liked）".into());
+    }
     ctx.db
         .call(move |c| {
             let tx = c.unchecked_transaction()?;
             let at = crate::now();
-            assert_and_recompute(
-                &tx,
-                movie_id,
-                at,
-                "standalone",
-                None,
-                "in_watchlist",
-                w as i64,
-            )?;
+            if let Some(w) = watchlist {
+                assert_and_recompute(
+                    &tx,
+                    movie_id,
+                    at,
+                    "standalone",
+                    None,
+                    "in_watchlist",
+                    w as i64,
+                )?;
+            }
+            if let Some(l) = liked {
+                // like 仅能标记看过（有 Diary 或 Review）的影片（report 2026-09-03）
+                let watched: i64 = tx.query_row(
+                    "SELECT watched FROM movies WHERE tmdb_id=?1",
+                    rusqlite::params![movie_id],
+                    |r| r.get(0),
+                )?;
+                if watched == 0 {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "只能对看过（有观影记录或影评）的影片点喜欢，先记一笔或写影评".into(),
+                    ));
+                }
+                assert_and_recompute(&tx, movie_id, at, "standalone", None, "liked", l as i64)?;
+            }
             recompute_movie_state(&tx, movie_id)?;
             tx.commit()?;
             Ok(())
@@ -1539,48 +1482,6 @@ mod write_regression_tests {
             .await
             .unwrap();
         assert_eq!(watched, 1, "无断言条目也必须更新 watched 派生");
-    }
-
-    #[tokio::test]
-    async fn stale_warning_is_scoped_to_movie() {
-        let (db, ctx) = setup_two_movies();
-        // 843：条目断言 90；844：更晚的条目断言（跨影片）
-        execute(
-            "manage_diary",
-            &ctx,
-            json!({"action":"add","movie_id":843,"watched_date":"2026-08-15","rating":90}),
-        )
-        .await
-        .unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100));
-        execute(
-            "manage_diary",
-            &ctx,
-            json!({"action":"add","movie_id":844,"watched_date":"2026-08-16","rating":70}),
-        )
-        .await
-        .unwrap();
-        let entry_id: String = db
-            .call(|c| {
-                c.query_row("SELECT id FROM diary_entries WHERE movie_id=843", [], |r| {
-                    r.get(0)
-                })
-            })
-            .await
-            .unwrap();
-        // 843 条目编辑不应被 844 的 Action 误触警告
-        let out = execute(
-            "manage_diary",
-            &ctx,
-            json!({"action":"update","entry_id":entry_id,"rating":92}),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            out["require_confirmation"],
-            Value::Null,
-            "跨影片断言不应触发警告: {out}"
-        );
     }
 
     // ===== P2：manage_lists（清单维护）=====
@@ -1753,49 +1654,60 @@ mod write_regression_tests {
     // ===== 评审修复回归（2026-09-01）=====
 
     #[tokio::test]
-    async fn entry_rating_clear_survives_recompute_and_banned_fields_rejected() {
+    async fn rating_clear_falls_back_and_banned_fields_rejected() {
         let (db, ctx) = setup_two_movies();
-        // 评分唯一断言源 = Diary：加条目评分 → 清除条目评分 → 终态清除存活
+        // 两个条目：3-15 评 90、4-20 评 80（观看日期更晚 → 终态 80）
         execute(
             "manage_diary",
             &ctx,
-            json!({"action":"add","movie_id":843,"watched_date":"2026-08-15","rating":90}),
+            json!({"action":"add","movie_id":843,"watched_date":"2026-03-15","rating":90}),
         )
         .await
         .unwrap();
-        let entry_id: String = db
-            .call(|c| {
-                c.query_row("SELECT id FROM diary_entries WHERE movie_id=843", [], |r| r.get(0))
-            })
-            .await
-            .unwrap();
         execute(
             "manage_diary",
             &ctx,
-            json!({"action":"update","entry_id":entry_id,"rating":null}),
+            json!({"action":"add","movie_id":843,"watched_date":"2026-04-20","rating":80}),
         )
         .await
         .unwrap();
-        let r: Option<i64> = db
+        let mr: i64 = db
+            .call(|c| c.query_row("SELECT my_rating FROM movies WHERE tmdb_id=843", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(mr, 80, "署名日期最靠后的有分条目持有终态");
+        // 改旧条目评分（60）不影响终态（非持有者）
+        let e1: String = db
             .call(|c| {
-                c.query_row("SELECT my_rating FROM movies WHERE tmdb_id=843", [], |r| r.get(0))
+                c.query_row("SELECT id FROM diary_entries WHERE movie_id=843 AND watched_date='2026-03-15'", [], |r| r.get(0))
             })
             .await
             .unwrap();
-        assert_eq!(r, None, "条目评分清除后 my_rating 必须为 NULL");
-        // 触发一次无关重算（想看切换）后仍不得复活
-        execute("set_movie_state", &ctx, json!({"movie_id": 843, "in_watchlist": true}))
+        execute("manage_diary", &ctx, json!({"action":"update","entry_id":e1,"rating":60}))
             .await
             .unwrap();
-        let r2: Option<i64> = db
+        let mr2: i64 = db
+            .call(|c| c.query_row("SELECT my_rating FROM movies WHERE tmdb_id=843", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(mr2, 80, "旧条目改分不改变终态（无覆盖警告概念）");
+        // 清除持有条目评分 → 回退到剩余有分条目
+        let e2: String = db
             .call(|c| {
-                c.query_row("SELECT my_rating FROM movies WHERE tmdb_id=843", [], |r| r.get(0))
+                c.query_row("SELECT id FROM diary_entries WHERE movie_id=843 AND watched_date='2026-04-20'", [], |r| r.get(0))
             })
             .await
             .unwrap();
-        assert_eq!(r2, None, "重算不得把清除断言跳过后落到旧值");
-        // 架构收敛：set_movie_state 拒绝评分/喜欢字段
-        for banned in ["my_rating", "liked", "clear_my_rating"] {
+        execute("manage_diary", &ctx, json!({"action":"update","entry_id":e2,"rating":null}))
+            .await
+            .unwrap();
+        let mr3: i64 = db
+            .call(|c| c.query_row("SELECT my_rating FROM movies WHERE tmdb_id=843", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(mr3, 60, "清除后回退到剩余有分条目");
+        // set_movie_state 仅拒评分（liked 已合法）
+        for banned in ["my_rating", "clear_my_rating"] {
             let mut payload = serde_json::Map::new();
             payload.insert("movie_id".into(), json!(843));
             payload.insert(banned.into(), json!(true));
@@ -1807,12 +1719,20 @@ mod write_regression_tests {
                 "越权字段 {banned} 必须被拒绝，实际: {err}"
             );
         }
-        // 无关重算没有把想看搞丢
-        let w: i64 = db
-            .call(|c| c.query_row("SELECT in_watchlist FROM movies WHERE tmdb_id=843", [], |r| r.get(0)))
+        // like：有 watched 的影片可点
+        execute("set_movie_state", &ctx, json!({"movie_id": 843, "liked": true}))
             .await
             .unwrap();
-        assert_eq!(w, 1, "想看断言应存活");
+        let liked: i64 = db
+            .call(|c| c.query_row("SELECT liked FROM movies WHERE tmdb_id=843", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(liked, 1);
+        // 未看过（844 无条目）→ 拒绝
+        let err = execute("set_movie_state", &ctx, json!({"movie_id": 844, "liked": true}))
+            .await
+            .unwrap_err();
+        assert!(err.contains("看过"), "未看过的影片不能喜欢: {err}");
     }
 
     #[tokio::test]
@@ -1822,7 +1742,7 @@ mod write_regression_tests {
             "manage_diary",
             &ctx,
             json!({"action":"add","movie_id":843,"watched_date":"2026-08-15",
-                   "rating":90,"liked":true,"in_theater":true,
+                   "rating":90,"in_theater":true,
                    "ticket_price_cents":4500,"note":"初看"}),
         )
         .await
@@ -1855,7 +1775,7 @@ mod write_regression_tests {
         assert_eq!(row.0, "2026-08-15", "watched_date 不得被表单垃圾值覆盖（缺陷 2）");
         assert_eq!(row.1, Some(90), "rating 不得重置");
         assert_eq!(row.2, 1, "in_theater 不得重置");
-        assert_eq!(row.3, 1, "liked 不得重置");
+        assert_eq!(row.3, 0, "条目 liked 不再由表单产生（like 状态量化后恒 0）");
         assert_eq!(row.4, Some(4500), "票价不得重置");
         assert_eq!(row.5, "改过的随记");
         // 清除语义：rating/票价 传 null（缺陷 15）

@@ -111,7 +111,8 @@ export default function DiaryEntryRow({
                   : ""}
               </span>
             )}
-            <span>第 {entry.rewatch_index + 1} 刷</span>
+            {/* rewatch_index 为 1-based（ROW_NUMBER），第 1 条 = 第 1 刷 */}
+            <span>第 {entry.rewatch_index} 刷</span>
           </div>
           {dims.length > 0 && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">

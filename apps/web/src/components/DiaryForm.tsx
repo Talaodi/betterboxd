@@ -4,7 +4,6 @@ export type DiaryFormData = {
   watched_date: string;
   rating: number | null;
   in_theater: boolean;
-  liked: boolean;
   ticket_price_cents: number | null;
   note: string;
   dimensions: Record<string, string[]>;
@@ -23,7 +22,6 @@ export function emptyDiaryForm(): DiaryFormData {
     watched_date: todayStr(),
     rating: null,
     in_theater: false,
-    liked: false,
     ticket_price_cents: null,
     note: "",
     dimensions: {},
@@ -45,7 +43,6 @@ export function diaryFormFromArgs(args: Record<string, unknown>): DiaryFormData 
     watched_date: (args["watched_date"] as string) ?? todayStr(),
     rating: (args["rating"] as number) ?? null,
     in_theater: (args["in_theater"] as boolean) ?? false,
-    liked: (args["liked"] as boolean) ?? false,
     ticket_price_cents: (args["ticket_price_cents"] as number) ?? null,
     note: (args["note"] as string) ?? "",
     dimensions: dims,
@@ -94,10 +91,6 @@ export function DiaryForm({
             />
           </span>
         )}
-        <span className="flex items-center gap-1">
-          <input type="checkbox" checked={data.liked} onChange={(e) => set({ liked: e.target.checked })} />
-          喜欢
-        </span>
       </label>
       <textarea
         rows={3}
