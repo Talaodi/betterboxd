@@ -4,6 +4,8 @@ import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type Mov
 import Poster from "../components/Poster";
 import DiaryEntryRow from "../components/DiaryEntryRow";
 import ReviewPosterCard from "../components/ReviewPosterCard";
+import EditDiaryModal from "../components/EditDiaryModal";
+import EditReviewModal from "../components/EditReviewModal";
 import ChatListRow from "../components/ChatListRow";
 import { StarsDisplay, StarsEditor } from "../components/Stars";
 
@@ -13,12 +15,25 @@ type Detail = {
   lists: { list_id: string; name: string; rank: number | null; ranked: number }[];
 };
 
+type ListMetaLite = {
+  id: string;
+  name: string;
+  source: string;
+  ranked: number;
+};
+
 export default function FilmDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [detail, setDetail] = useState<Detail | null>(null);
   const [showDiary, setShowDiary] = useState(false);
   const [showReview, setShowReview] = useState(false);
+  const [editDiaryId, setEditDiaryId] = useState<string | null>(null);
+  const [editReviewId, setEditReviewId] = useState<string | null>(null);
+  // List 归属区：加入清单下拉 + 新建内联
+  const [showListPicker, setShowListPicker] = useState(false);
+  const [allLists, setAllLists] = useState<ListMetaLite[]>([]);
+  const [newListName, setNewListName] = useState("");
   // Log 三板块折叠态（点击板块标题收起内容仅剩标题条）
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -35,6 +50,42 @@ export default function FilmDetail() {
       load();
     } catch (e) {
       alert(`状态修改失败: ${(e as Error).message}`);
+    }
+  };
+
+  const openListPicker = async () => {
+    setShowListPicker((v) => !v);
+    if (!showListPicker) {
+      try {
+        const d = await getJson<{ lists: ListMetaLite[] }>("/api/lists");
+        setAllLists(d.lists);
+      } catch (e) {
+        alert(`清单加载失败: ${(e as Error).message}`);
+      }
+    }
+  };
+
+  const addToList = async (listId: string) => {
+    try {
+      await sendJson(`/api/lists/${listId}/items`, "POST", { movie_id: Number(id) });
+      setShowListPicker(false);
+      load();
+    } catch (e) {
+      alert(`加入失败: ${(e as Error).message}`);
+    }
+  };
+
+  const createAndAdd = async () => {
+    const name = newListName.trim();
+    if (!name) return;
+    try {
+      const out = await sendJson<{ list_id: string }>("/api/lists", "POST", { name });
+      setNewListName("");
+      await sendJson(`/api/lists/${out.list_id}/items`, "POST", { movie_id: Number(id) });
+      setShowListPicker(false);
+      load();
+    } catch (e) {
+      alert(`新建失败: ${(e as Error).message}`);
     }
   };
 
@@ -152,16 +203,68 @@ export default function FilmDetail() {
         </div>
       </div>
 
-      {/* List 归属徽章 */}
-      {detail.lists.length > 0 && (
-        <div className="mt-6 text-xs">
-          {detail.lists.map((l) => (
-            <span key={l.list_id} className="mr-2 rounded bg-[#2c3440] px-2 py-1">
-              {l.ranked && l.rank ? `Rank #${l.rank} in ${l.name}` : `In ${l.name}`}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* List 归属区：徽章流 + 加入清单下拉 */}
+      <div className="mt-6 flex flex-wrap items-center gap-2 text-xs">
+        {detail.lists.map((l) => (
+          <span
+            key={l.list_id}
+            className={
+              "rounded px-2 py-1 " +
+              (l.ranked && l.rank
+                ? "bg-[#ff8000]/15 text-[#ff8000]"
+                : "bg-[#2c3440] text-[#c8d2dc]")
+            }
+          >
+            {l.ranked && l.rank ? `No.${l.rank} in ${l.name}` : `in ${l.name}`}
+          </span>
+        ))}
+        <span className="relative">
+          <button
+            className="rounded border border-[#456] px-2 py-1 text-[#8899aa] hover:text-white"
+            onClick={openListPicker}
+          >
+            + 加入 List
+          </button>
+          {showListPicker && (
+            <div className="absolute left-0 top-8 z-40 w-60 rounded-lg border border-[#33414f] bg-[#1b222b] p-2 shadow-xl">
+              {allLists.map((l) => {
+                const joined = detail.lists.some((x) => x.list_id === l.id);
+                return (
+                  <button
+                    key={l.id}
+                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[#c8d2dc] hover:bg-[#2c3440] disabled:opacity-40"
+                    disabled={joined || l.source === "letterboxd"}
+                    onClick={() => addToList(l.id)}
+                  >
+                    <span className="truncate">
+                      {l.name}
+                      {l.ranked === 1 && (
+                        <span className="ml-1 text-[10px] text-[#5a6b7c]">排名</span>
+                      )}
+                    </span>
+                    {joined && <span className="text-[#00e054]">✓</span>}
+                  </button>
+                );
+              })}
+              <div className="mt-2 flex gap-1 border-t border-[#2c3440] pt-2">
+                <input
+                  placeholder="新清单名…"
+                  className="min-w-0 flex-1 rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-xs"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createAndAdd()}
+                />
+                <button
+                  className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
+                  onClick={createAndAdd}
+                >
+                  建
+                </button>
+              </div>
+            </div>
+          )}
+        </span>
+      </div>
 
       {/* Log 三板块竖排：Diary → Reviews → Chats，各板块内时间倒序，标题可折叠 */}
       <div className="mt-8 space-y-6">
@@ -184,6 +287,7 @@ export default function FilmDetail() {
                   entry={entry}
                   firstOfMonth={firstOfMonth}
                   onDelete={delEntry}
+                  onEdit={setEditDiaryId}
                 />
               );
             })}
@@ -204,6 +308,7 @@ export default function FilmDetail() {
                   movieId={m.tmdb_id}
                   movieTitle={m.title_main}
                   titleSub={m.title_sub || null}
+                  onEdit={() => setEditReviewId(String(l.id))}
                 />
               ) : null,
             )}
@@ -232,6 +337,12 @@ export default function FilmDetail() {
       </div>
       {showDiary && <DiaryModal movieId={m.tmdb_id} onClose={() => { setShowDiary(false); load(); }} onSaved={() => { setShowDiary(false); load(); }} />}
       {showReview && <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />}
+      {editDiaryId && (
+        <EditDiaryModal entryId={editDiaryId} onClose={() => setEditDiaryId(null)} onSaved={load} />
+      )}
+      {editReviewId && (
+        <EditReviewModal reviewId={editReviewId} onClose={() => setEditReviewId(null)} onSaved={load} />
+      )}
     </div>
   );
 }

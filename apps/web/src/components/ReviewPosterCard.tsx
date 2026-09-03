@@ -23,12 +23,15 @@ export default function ReviewPosterCard({
   movieTitle,
   titleSub,
   onDelete,
+  onEdit,
 }: {
   review: ReviewCardData;
   movieId: number;
   movieTitle: string;
   titleSub?: string | null;
   onDelete?: () => void;
+  /** P2：打开编辑弹窗（✎） */
+  onEdit?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   // 内容实际高度 ≤ 收起高度 → 短文，无需展开按钮
@@ -79,17 +82,30 @@ export default function ReviewPosterCard({
                   {review.liked === 1 && <span className="text-sm text-[#00e054]">♥</span>}
                 </div>
               </div>
-              {onDelete && (
-                <button
-                  className="shrink-0 text-xs text-[#5a6b7c] hover:text-[#ff8000]"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete();
-                  }}
-                >
-                  删除
-                </button>
-              )}
+              <div className="flex shrink-0 items-center gap-3 text-xs">
+                {onEdit && (
+                  <button
+                    className="text-[#5a6b7c] hover:text-[#40bcf4]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEdit();
+                    }}
+                  >
+                    ✎ 编辑
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    className="text-[#5a6b7c] hover:text-[#ff8000]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete();
+                    }}
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
             </div>
             <div className="mt-2">
               <Markdown>{review.body_md}</Markdown>

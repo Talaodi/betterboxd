@@ -491,6 +491,154 @@ async fn list_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Resp
     }
 }
 
+async fn movie_add_from_tmdb(
+    State(app): State<App>,
+    Json(args): Json<serde_json::Value>,
+) -> Response {
+    let Some(tmdb_id) = args["tmdb_id"].as_i64() else {
+        return (StatusCode::BAD_REQUEST, "缺少 tmdb_id").into_response();
+    };
+    // 建最小桩（若已存在则跳过），详情页懒拉取会补全
+    let r = app
+        .db
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO movies (tmdb_id, updated_at) VALUES (?1,?2)
+                 ON CONFLICT(tmdb_id) DO NOTHING",
+                rusqlite::params![tmdb_id, betterboxd_core::now()],
+            )?;
+            Ok(())
+        })
+        .await;
+    if let Err(e) = r {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+    }
+    // 尽力拉详情（TMDB 宕机不阻塞——桩已建，详情页可再试）
+    let _ = betterboxd_core::tools::ensure_movie_details(&app.tmdb, &app.db, tmdb_id).await;
+    Json(json!({"ok": true, "tmdb_id": tmdb_id})).into_response()
+}
+
+async fn review_get(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return (StatusCode::BAD_REQUEST, "非法影评 ID").into_response();
+    }
+    match app
+        .db
+        .select_json_params(
+            "SELECT review_id, movie_id, title, body_md, rating, liked, created_at, updated_at
+             FROM v_reviews_full WHERE review_id=?1"
+                .into(),
+            vec![betterboxd_core::db::SqlVal::Text(id)],
+        )
+        .await
+    {
+        Ok(rows) => match rows.into_iter().next() {
+            Some(review) => Json(json!({"review": review})).into_response(),
+            None => (StatusCode::NOT_FOUND, "影评不存在").into_response(),
+        },
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// 清单写路径统一走 manage_lists 工具（REST 直连 = 用户明确意图，confirm=None）。
+async fn list_add(State(app): State<App>, Json(mut args): Json<serde_json::Value>) -> Response {
+    args["action"] = json!("create");
+    match tools::execute("manage_lists", &tool_ctx(&app), args).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn list_update(
+    State(app): State<App>,
+    AxPath(id): AxPath<String>,
+    Json(args): Json<serde_json::Value>,
+) -> Response {
+    let mut full = args.clone();
+    full["action"] = json!("update");
+    full["list_id"] = json!(id);
+    match tools::execute("manage_lists", &tool_ctx(&app), full).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn list_delete(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    match tools::execute(
+        "manage_lists",
+        &tool_ctx(&app),
+        json!({"action": "delete", "list_id": id}),
+    )
+    .await
+    {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn list_item_add(
+    State(app): State<App>,
+    AxPath(id): AxPath<String>,
+    Json(args): Json<serde_json::Value>,
+) -> Response {
+    let mut full = args.clone();
+    full["action"] = json!("add_item");
+    full["list_id"] = json!(id);
+    match tools::execute("manage_lists", &tool_ctx(&app), full).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+/// rank 编辑（拖拽留待后续）：仅 manual 清单。
+async fn list_item_rank(
+    State(app): State<App>,
+    AxPath((id, movie_id)): AxPath<(String, i64)>,
+    Json(args): Json<serde_json::Value>,
+) -> Response {
+    let rank = args["rank"].as_i64();
+    let r = app
+        .db
+        .call(move |c| {
+            let src: String = c
+                .query_row("SELECT source FROM lists WHERE id=?1", rusqlite::params![id], |r| r.get(0))
+                .map_err(|_| rusqlite::Error::InvalidParameterName("清单不存在".into()))?;
+            if src == "letterboxd" {
+                return Err(rusqlite::Error::InvalidParameterName("Letterboxd 镜像清单只读".into()));
+            }
+            c.execute(
+                "UPDATE list_items SET rank=?3 WHERE list_id=?1 AND movie_id=?2",
+                rusqlite::params![id, movie_id, rank],
+            )?;
+            c.execute(
+                "UPDATE lists SET updated_at=?2 WHERE id=?1",
+                rusqlite::params![id, betterboxd_core::now()],
+            )?;
+            Ok(())
+        })
+        .await;
+    match r {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
+    }
+}
+
+async fn list_item_remove(
+    State(app): State<App>,
+    AxPath((id, movie_id)): AxPath<(String, i64)>,
+) -> Response {
+    match tools::execute(
+        "manage_lists",
+        &tool_ctx(&app),
+        json!({"action": "remove_item", "list_id": id, "movie_id": movie_id}),
+    )
+    .await
+    {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
 async fn tmdb_search(
     State(app): State<App>,
     Query(q): Query<std::collections::HashMap<String, String>>,
@@ -1195,8 +1343,18 @@ async fn main() {
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
         .route("/api/chats", get(chats_list))
         .route("/api/chats/{id}", get(chat_detail).delete(chat_delete))
-        .route("/api/lists", get(lists_list))
-        .route("/api/lists/{id}", get(list_detail))
+        .route("/api/lists", get(lists_list).post(list_add))
+        .route(
+            "/api/lists/{id}",
+            get(list_detail).put(list_update).delete(list_delete),
+        )
+        .route("/api/lists/{id}/items", post(list_item_add))
+        .route(
+            "/api/lists/{id}/items/{movie_id}",
+            put(list_item_rank).delete(list_item_remove),
+        )
+        .route("/api/movies/add_from_tmdb", post(movie_add_from_tmdb))
+        .route("/api/reviews/{id}", get(review_get))
         .route("/api/config", get(config_get).post(config_save))
         .fallback_service(tower_http::services::ServeDir::new("apps/web/dist"))
         .with_state(app);

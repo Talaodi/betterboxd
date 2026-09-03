@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getJson, sendJson } from "../api";
 import ReviewPosterCard from "../components/ReviewPosterCard";
+import EditReviewModal from "../components/EditReviewModal";
 
 type ReviewRow = {
   review_id: string;
@@ -18,6 +19,7 @@ type ReviewRow = {
 
 export default function Reviews() {
   const [reviews, setReviews] = useState<ReviewRow[] | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     getJson<{ reviews: ReviewRow[] }>("/api/reviews")
@@ -64,9 +66,13 @@ export default function Reviews() {
             movieTitle={r.title_zh}
             titleSub={r.title_sub}
             onDelete={() => del(r)}
+            onEdit={() => setEditId(r.review_id)}
           />
         ))}
       </div>
+      {editId && (
+        <EditReviewModal reviewId={editId} onClose={() => setEditId(null)} onSaved={load} />
+      )}
     </div>
   );
 }

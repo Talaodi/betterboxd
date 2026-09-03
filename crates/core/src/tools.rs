@@ -133,6 +133,22 @@ pub fn registry() -> ToolRegistry {
                 parameters: obj_schema(json!({}), &[]),
             },
             ToolMeta {
+                name: "manage_lists",
+                description: "管理影片清单：create（name 必填，ranked 开关）、update（list_id+名称/描述/ranked）、delete（list_id）、add_item（list_id+movie_id，ranked 清单 rank 缺省自动追加队尾）、remove_item（list_id+movie_id）。Letterboxd 镜像清单只读，禁止修改/删除。先 lookup_lists 拿 list_id。",
+                parameters: obj_schema(
+                    json!({
+                        "action": {"type": "string", "enum": ["create", "update", "delete", "add_item", "remove_item"]},
+                        "list_id": {"type": "string"},
+                        "movie_id": {"type": "integer"},
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "ranked": {"type": "boolean"},
+                        "rank": {"type": "integer", "description": "ranked 清单中的名次；缺省追加队尾"}
+                    }),
+                    &["action"],
+                ),
+            },
+            ToolMeta {
                 name: "list_saved_queries",
                 description: "列出已保存的统计项目（id/名称/SQL/最近运行时间）。统计前先查这里，命中同类项目直接用 run_stats 的 saved_query_id 复跑。",
                 parameters: obj_schema(json!({}), &[]),
@@ -214,6 +230,7 @@ pub async fn execute(name: &str, ctx: &ToolCtx, args: Value) -> Result<Value, St
         "get_profile_snapshot" => get_profile_snapshot(ctx).await,
         "lookup_lists" => lookup_lists(ctx).await,
         "list_saved_queries" => list_saved_queries(ctx).await,
+        "manage_lists" => manage_lists(ctx, &args).await,
         "manage_saved_queries" => manage_saved_queries(ctx, &args).await,
         "manage_diary" => manage_diary(ctx, &args).await,
         "manage_reviews" => manage_reviews(ctx, &args).await,
@@ -467,6 +484,209 @@ async fn lookup_lists(ctx: &ToolCtx) -> Result<Value, String> {
     Ok(json!({"lists": rows}))
 }
 
+/// 清单维护（v0 §5.1 规格；确认门内）。List 变更不落账（非影片状态断言）。
+/// LB 镜像（source='letterboxd'）只读：update/delete/add_item/remove_item 一律拒绝。
+/// 业务错误统一用 InvalidParameterName(中文消息) 承载，Display 直出给模型/用户。
+async fn manage_lists(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    let args = confirmed_args(ctx, "manage_lists", args.clone()).await?;
+    let action = get_str(&args, "action").ok_or("缺少 action")?;
+    let list_id = get_str(&args, "list_id").map(String::from);
+    let touch = |tx: &Connection, id: &str| -> rusqlite::Result<()> {
+        tx.execute(
+            "UPDATE lists SET updated_at=?2 WHERE id=?1",
+            rusqlite::params![id, crate::now()],
+        )?;
+        Ok(())
+    };
+    let invalid = |msg: String| rusqlite::Error::InvalidParameterName(msg);
+    let friendly = |e: crate::db::DbError| {
+        let msg = e.to_string();
+        if msg.contains("UNIQUE constraint failed: lists.name") {
+            "已存在同名清单".into()
+        } else {
+            msg
+        }
+    };
+    match action {
+        "create" => {
+            let name = get_str(&args, "name").ok_or("缺少 name")?.trim().to_string();
+            if name.is_empty() {
+                return Err("清单名不能为空".into());
+            }
+            let ranked = get_bool(&args, "ranked").unwrap_or(false) as i64;
+            let desc = get_str(&args, "description").map(String::from);
+            let id = uuid::Uuid::now_v7().to_string();
+            let id_in = id.clone();
+            let name_out = name.clone();
+            ctx.db
+                .call(move |c| {
+                    c.execute(
+                        "INSERT INTO lists (id, name, description, source, ranked, created_at, updated_at)
+                         VALUES (?1,?2,?3,'manual',?4,?5,?5)",
+                        rusqlite::params![id_in, name, desc, ranked, crate::now()],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .map_err(friendly)?;
+            Ok(json!({"ok": true, "list_id": id, "name": name_out}))
+        }
+        "update" => {
+            let id = list_id.ok_or("缺少 list_id")?;
+            let name = get_str(&args, "name").map(|s| s.trim().to_string());
+            let desc = get_str(&args, "description").map(String::from);
+            let ranked = get_bool(&args, "ranked");
+            if name.as_deref().map(str::is_empty).unwrap_or(false) {
+                return Err("清单名不能为空".into());
+            }
+            if name.is_none() && desc.is_none() && ranked.is_none() {
+                return Err("未提供任何变更字段（name/description/ranked）".into());
+            }
+            let id2 = id.clone();
+            ctx.db
+                .call(move |c| {
+                    let src: String = c
+                        .query_row(
+                            "SELECT source FROM lists WHERE id=?1",
+                            rusqlite::params![id2],
+                            |r| r.get(0),
+                        )
+                        .map_err(|_| invalid(format!("清单 {id2} 不存在")))?;
+                    if src == "letterboxd" {
+                        return Err(invalid("Letterboxd 镜像清单只读，不能修改".into()));
+                    }
+                    if let Some(n) = &name {
+                        c.execute(
+                            "UPDATE lists SET name=?2 WHERE id=?1",
+                            rusqlite::params![id2, n],
+                        )?;
+                    }
+                    if let Some(d) = &desc {
+                        c.execute(
+                            "UPDATE lists SET description=?2 WHERE id=?1",
+                            rusqlite::params![id2, d],
+                        )?;
+                    }
+                    if let Some(r) = ranked {
+                        c.execute(
+                            "UPDATE lists SET ranked=?2 WHERE id=?1",
+                            rusqlite::params![id2, r as i64],
+                        )?;
+                    }
+                    touch(c, &id2)?;
+                    Ok(())
+                })
+                .await
+                .map_err(friendly)?;
+            Ok(json!({"ok": true, "list_id": id}))
+        }
+        "delete" => {
+            let id = list_id.ok_or("缺少 list_id")?;
+            let id2 = id.clone();
+            ctx.db
+                .call(move |c| {
+                    let src: String = c
+                        .query_row(
+                            "SELECT source FROM lists WHERE id=?1",
+                            rusqlite::params![id2],
+                            |r| r.get(0),
+                        )
+                        .map_err(|_| invalid(format!("清单 {id2} 不存在")))?;
+                    if src == "letterboxd" {
+                        return Err(invalid("Letterboxd 镜像清单只读，不能删除".into()));
+                    }
+                    c.execute("DELETE FROM lists WHERE id=?1", rusqlite::params![id2])?;
+                    Ok(())
+                })
+                .await
+                .map_err(friendly)?;
+            Ok(json!({"ok": true, "deleted": id}))
+        }
+        "add_item" => {
+            let id = list_id.ok_or("缺少 list_id")?;
+            let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
+            let rank_req = get_i64(&args, "rank");
+            let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
+            let id2 = id.clone();
+            ctx.db
+                .call(move |c| {
+                    let (src, ranked): (String, i64) = c
+                        .query_row(
+                            "SELECT source, ranked FROM lists WHERE id=?1",
+                            rusqlite::params![id2],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
+                        )
+                        .map_err(|_| invalid(format!("清单 {id2} 不存在")))?;
+                    if src == "letterboxd" {
+                        return Err(invalid("Letterboxd 镜像清单只读，不能添加条目".into()));
+                    }
+                    let rank: Option<i64> = if ranked == 1 {
+                        match rank_req {
+                            Some(r) => Some(r),
+                            None => Some(
+                                c.query_row(
+                                    "SELECT COALESCE(MAX(rank),0)+1 FROM list_items WHERE list_id=?1",
+                                    rusqlite::params![id2],
+                                    |r| r.get(0),
+                                )?,
+                            ),
+                        }
+                    } else {
+                        None
+                    };
+                    c.execute(
+                        "INSERT INTO list_items (list_id, movie_id, rank, added_at)
+                         VALUES (?1,?2,?3,?4)",
+                        rusqlite::params![id2, movie_id, rank, crate::now()],
+                    )?;
+                    touch(c, &id2)?;
+                    Ok(())
+                })
+                .await
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("UNIQUE constraint failed: list_items") {
+                        format!("影片 {movie_id} 已在该清单中")
+                    } else {
+                        msg
+                    }
+                })?;
+            Ok(json!({"ok": true, "list_id": id, "movie_id": movie_id}))
+        }
+        "remove_item" => {
+            let id = list_id.ok_or("缺少 list_id")?;
+            let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
+            let id2 = id.clone();
+            ctx.db
+                .call(move |c| {
+                    let src: String = c
+                        .query_row(
+                            "SELECT source FROM lists WHERE id=?1",
+                            rusqlite::params![id2],
+                            |r| r.get(0),
+                        )
+                        .map_err(|_| invalid(format!("清单 {id2} 不存在")))?;
+                    if src == "letterboxd" {
+                        return Err(invalid("Letterboxd 镜像清单只读，不能移除条目".into()));
+                    }
+                    let n = c.execute(
+                        "DELETE FROM list_items WHERE list_id=?1 AND movie_id=?2",
+                        rusqlite::params![id2, movie_id],
+                    )?;
+                    if n == 0 {
+                        return Err(invalid(format!("影片 {movie_id} 不在该清单中")));
+                    }
+                    touch(c, &id2)?;
+                    Ok(())
+                })
+                .await
+                .map_err(friendly)?;
+            Ok(json!({"ok": true, "list_id": id, "movie_id": movie_id}))
+        }
+        _ => Err(format!("未知 action: {action}")),
+    }
+}
+
 async fn list_saved_queries(ctx: &ToolCtx) -> Result<Value, String> {
     let rows = ctx
         .db
@@ -587,6 +807,7 @@ pub const CONFIRM_TOOLS: &[&str] = &[
     "manage_diary",
     "manage_reviews",
     "set_movie_state",
+    "manage_lists",
     "manage_saved_queries",
 ];
 
@@ -1342,6 +1563,151 @@ mod write_regression_tests {
             Value::Null,
             "跨影片断言不应触发警告: {out}"
         );
+    }
+
+    // ===== P2：manage_lists（清单维护）=====
+
+    #[tokio::test]
+    async fn lists_crud_ranked_tail_and_lb_readonly() {
+        let (db, ctx) = setup_two_movies();
+        // create ranked 清单
+        let out = execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"create","name":"2026 十佳候选","ranked":true}),
+        )
+        .await
+        .unwrap();
+        let list_id = out["list_id"].as_str().unwrap().to_string();
+        // add_item 未指定 rank → 自动追加队尾 1、2
+        execute("manage_lists", &ctx, json!({"action":"add_item","list_id":list_id,"movie_id":843}))
+            .await
+            .unwrap();
+        execute("manage_lists", &ctx, json!({"action":"add_item","list_id":list_id,"movie_id":844}))
+            .await
+            .unwrap();
+        let ranks: Vec<(i64, Option<i64>)> = db
+            .call({
+                let id = list_id.clone();
+                move |c| {
+                    let mut st = c.prepare("SELECT movie_id, rank FROM list_items WHERE list_id=?1 ORDER BY rank")?;
+                    let rows = st.query_map(rusqlite::params![id], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?))
+                    })?;
+                    rows.collect()
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(ranks, vec![(843, Some(1)), (844, Some(2))], "ranked 清单缺省 rank 应追加队尾");
+        // 重复添加 → 报错
+        let err = execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"add_item","list_id":list_id,"movie_id":843}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("已在"), "重复添加应报错: {err}");
+        // update 改名 + unranked
+        execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"update","list_id":list_id,"name":"年度片单","ranked":false}),
+        )
+        .await
+        .unwrap();
+        let (name, ranked): (String, i64) = db
+            .call({
+                let id = list_id.clone();
+                move |c| {
+                    c.query_row("SELECT name, ranked FROM lists WHERE id=?1", rusqlite::params![id], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(name, "年度片单");
+        assert_eq!(ranked, 0);
+        // 同名 create → 冲突
+        let err = execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"create","name":"年度片单"}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("同名清单"), "同名冲突应友好报错: {err}");
+        // LB 镜像只读
+        let lb_id: String = db
+            .call(|c| {
+                c.execute(
+                    "INSERT INTO lists (id, name, source, ranked, created_at, updated_at, external_id)
+                     VALUES ('lb-1','LB 镜像','letterboxd',1,1,1,'xyz')",
+                    [],
+                )?;
+                Ok("lb-1".into())
+            })
+            .await
+            .unwrap();
+        for act in ["update", "delete", "add_item", "remove_item"] {
+            let mut payload = json!({"action": act, "list_id": lb_id});
+            if act == "add_item" || act == "remove_item" {
+                payload["movie_id"] = json!(843);
+            }
+            if act == "update" {
+                payload["name"] = json!("改名");
+            }
+            let err = execute("manage_lists", &ctx, payload).await.unwrap_err();
+            assert!(err.contains("只读"), "{act} 对 LB 镜像应拒绝: {err}");
+        }
+        // remove_item + delete
+        execute("manage_lists", &ctx, json!({"action":"remove_item","list_id":list_id,"movie_id":843}))
+            .await
+            .unwrap();
+        execute("manage_lists", &ctx, json!({"action":"delete","list_id":list_id}))
+            .await
+            .unwrap();
+        let n: i64 = db
+            .call(|c| c.query_row("SELECT COUNT(*) FROM lists", [], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(n, 1, "只剩 LB 镜像清单");
+        let n2: i64 = db
+            .call(move |c| c.query_row("SELECT COUNT(*) FROM list_items WHERE list_id=?", rusqlite::params![list_id], |r| r.get(0)))
+            .await
+            .unwrap();
+        assert_eq!(n2, 0, "删除清单级联清空条目");
+    }
+
+    #[tokio::test]
+    async fn lists_unranked_add_has_null_rank() {
+        let (db, ctx) = setup_two_movies();
+        let out = execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"create","name":"随机想看","description":"杂项","ranked":false}),
+        )
+        .await
+        .unwrap();
+        let list_id = out["list_id"].as_str().unwrap().to_string();
+        execute("manage_lists", &ctx, json!({"action":"add_item","list_id":list_id,"movie_id":843,"rank":3}))
+            .await
+            .unwrap();
+        let rank: Option<i64> = db
+            .call({
+                let id = list_id.clone();
+                move |c| {
+                    c.query_row("SELECT rank FROM list_items WHERE list_id=?1", rusqlite::params![id], |r| r.get(0))
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(rank, None, "unranked 清单 rank 必须为 NULL（指定也不写）");
+        // 未知 action
+        let err = execute("manage_lists", &ctx, json!({"action":"bogus"})).await.unwrap_err();
+        assert!(err.contains("未知 action"));
     }
 
     // ===== 评审修复回归（2026-09-01）=====

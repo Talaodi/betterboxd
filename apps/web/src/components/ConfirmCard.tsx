@@ -92,6 +92,8 @@ export default function ConfirmCard({
   const isDiary = pending.name === "manage_diary";
   const isReview = pending.name === "manage_reviews";
   const isState = pending.name === "set_movie_state";
+  const isList = pending.name === "manage_lists";
+  const isListForm = isList && (action === "create" || action === "update");
   const isSqCreate =
     pending.name === "manage_saved_queries" && action === "create";
   const isDelete = action === "delete";
@@ -159,6 +161,17 @@ export default function ConfirmCard({
     isSqCreate ? String(pending.args?.name ?? "") : "",
   );
 
+  // manage_lists create/update：名称/描述/ranked 可编辑
+  const [listName, setListName] = useState(() =>
+    isListForm ? String(pending.args?.name ?? "") : "",
+  );
+  const [listDesc, setListDesc] = useState(() =>
+    isListForm ? String(pending.args?.description ?? "") : "",
+  );
+  const [listRanked, setListRanked] = useState(() =>
+    isListForm ? pending.args?.ranked === true : false,
+  );
+
   const confirm = () => {
     if (isDelete) {
       onConfirm(pending.args);
@@ -184,6 +197,13 @@ export default function ConfirmCard({
       });
     } else if (isSqCreate) {
       onConfirm({ ...pending.args, name: sqName.trim() || "未命名统计" });
+    } else if (isListForm) {
+      onConfirm({
+        ...pending.args,
+        name: listName.trim(),
+        description: listDesc,
+        ranked: listRanked,
+      });
     } else {
       onConfirm(pending.args);
     }
@@ -199,7 +219,9 @@ export default function ConfirmCard({
         ? "此影评"
         : pending.name === "manage_saved_queries"
           ? `统计项目「${String(pending.args?.saved_query_id ?? "")}」`
-          : "此对象";
+          : isList
+            ? `清单「${String(pending.args?.list_id ?? "")}」`
+            : "此对象";
     return (
       <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
         <p className="mb-3 text-sm font-medium text-[#ff8000]">✎ 待确认 · 删除</p>
@@ -333,6 +355,76 @@ export default function ConfirmCard({
             onClick={confirm}
           >
             确认保存
+          </button>
+          <button className="rounded border border-[#456] px-3 py-1.5 text-sm" onClick={reject}>
+            拒绝
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== manage_lists create/update：可编辑表单 =====
+  if (isListForm) {
+    return (
+      <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
+        <p className="mb-3 text-sm font-medium text-[#ff8000]">
+          ✎ 待确认 · {action === "create" ? "新建清单" : "修改清单"}
+        </p>
+        <div className="space-y-2">
+          <input
+            placeholder="清单名"
+            className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
+            value={listName}
+            onChange={(e) => setListName(e.target.value)}
+          />
+          <textarea
+            rows={2}
+            placeholder="描述（可选）"
+            className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
+            value={listDesc}
+            onChange={(e) => setListDesc(e.target.value)}
+          />
+          <label className="flex items-center gap-1 text-sm">
+            <input
+              type="checkbox"
+              checked={listRanked}
+              onChange={(e) => setListRanked(e.target.checked)}
+            />
+            排名清单（Rank #N）
+          </label>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <button
+            className="rounded bg-[#00e054] px-3 py-1.5 text-sm font-medium text-[#0c1a10]"
+            onClick={confirm}
+          >
+            确认执行
+          </button>
+          <button className="rounded border border-[#456] px-3 py-1.5 text-sm" onClick={reject}>
+            拒绝
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== manage_lists add_item/remove_item：摘要确认 =====
+  if (isList) {
+    const summary =
+      action === "add_item"
+        ? `把影片 ${String(pending.args?.movie_id ?? "")} 加入清单 ${String(pending.args?.list_id ?? "")}`
+        : `把影片 ${String(pending.args?.movie_id ?? "")} 移出清单 ${String(pending.args?.list_id ?? "")}`;
+    return (
+      <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
+        <p className="mb-3 text-sm font-medium text-[#ff8000]">✎ 待确认 · 修改清单归属</p>
+        <p className="text-sm text-[#dfe7ef]">{summary}</p>
+        <div className="mt-3 flex gap-2">
+          <button
+            className="rounded bg-[#00e054] px-3 py-1.5 text-sm font-medium text-[#0c1a10]"
+            onClick={confirm}
+          >
+            确认执行
           </button>
           <button className="rounded border border-[#456] px-3 py-1.5 text-sm" onClick={reject}>
             拒绝

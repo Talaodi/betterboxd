@@ -11,11 +11,14 @@ export default function DiaryEntryRow({
   entry,
   firstOfMonth = false,
   onDelete,
+  onEdit,
 }: {
   entry: DiaryRow;
   /** 该行是否为其所在月份的首行（显示月份徽章） */
   firstOfMonth?: boolean;
   onDelete?: (entryId: string) => void;
+  /** P2：打开编辑弹窗（✎ 图标） */
+  onEdit?: (entryId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -75,9 +78,10 @@ export default function DiaryEntryRow({
             className="cursor-pointer hover:text-[#40bcf4]"
             onClick={(e) => {
               e.stopPropagation();
-              setOpen(!open);
+              if (onEdit) onEdit(entry.entry_id);
+              else setOpen(!open);
             }}
-            title="展开/编辑"
+            title={onEdit ? "编辑" : "展开"}
           >
             ✎
           </span>

@@ -3,9 +3,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getJson, sendJson, type DiaryRow } from "../api";
 import DiaryEntryRow from "../components/DiaryEntryRow";
+import EditDiaryModal from "../components/EditDiaryModal";
 
 export default function Diary() {
   const [rows, setRows] = useState<DiaryRow[] | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const load = () => {
@@ -39,21 +41,32 @@ export default function Diary() {
   let prevMonth = "";
 
   return (
-    <div className="mx-auto max-w-[1100px] pb-10">
-      <div className="flex items-center justify-between px-2 py-3">
-        <span className="text-sm font-medium tracking-widest text-[#8899aa]">DIARY</span>
-        <span className="text-xs text-[#5a6b7c]">共 {rows.length} 条</span>
+    <>
+      <div className="mx-auto max-w-[1100px] pb-10">
+        <div className="flex items-center justify-between px-2 py-3">
+          <span className="text-sm font-medium tracking-widest text-[#8899aa]">DIARY</span>
+          <span className="text-xs text-[#5a6b7c]">共 {rows.length} 条</span>
+        </div>
+        <div className="border-t border-[#2c3440]">
+          {rows.map((r) => {
+            const monthKey = r.watched_date.slice(0, 7);
+            const firstOfMonth = monthKey !== prevMonth;
+            prevMonth = monthKey;
+            return (
+              <DiaryEntryRow
+                key={r.entry_id}
+                entry={r}
+                firstOfMonth={firstOfMonth}
+                onDelete={del}
+                onEdit={setEditId}
+              />
+            );
+          })}
+        </div>
       </div>
-      <div className="border-t border-[#2c3440]">
-        {rows.map((r) => {
-          const monthKey = r.watched_date.slice(0, 7);
-          const firstOfMonth = monthKey !== prevMonth;
-          prevMonth = monthKey;
-          return (
-            <DiaryEntryRow key={r.entry_id} entry={r} firstOfMonth={firstOfMonth} onDelete={del} />
-          );
-        })}
-      </div>
-    </div>
+      {editId && (
+        <EditDiaryModal entryId={editId} onClose={() => setEditId(null)} onSaved={load} />
+      )}
+    </>
   );
 }
