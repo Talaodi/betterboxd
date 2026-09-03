@@ -221,7 +221,13 @@ async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Respon
     let lists = app
         .db
         .select_json(&format!(
-            "SELECT list_id, name, rank, ranked FROM v_lists WHERE movie_id={id}"
+            "SELECT l.id AS list_id, l.name, li.rank, l.ranked, l.updated_at,
+                    (SELECT COUNT(*) FROM list_items x WHERE x.list_id = l.id) AS item_count,
+                    (SELECT x.movie_id FROM list_items x WHERE x.list_id = l.id
+                      ORDER BY x.rank IS NULL, x.rank, x.added_at LIMIT 1) AS cover_movie_id
+             FROM list_items li JOIN lists l ON l.id = li.list_id
+             WHERE li.movie_id={id}
+             ORDER BY li.rank IS NULL, li.rank, l.updated_at DESC"
         ))
         .await;
     // Log 富化：三类各查一次全量（量小），按 id 挂 payload（前端渲染互动卡片）
@@ -477,7 +483,8 @@ async fn list_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Resp
         return (StatusCode::NOT_FOUND, "清单不存在").into_response();
     };
     let ranked = m["ranked"].as_i64() == Some(1);
-    let order = if ranked { "rank IS NULL, rank" } else { "added_at" };
+    let _ = ranked; // 两种清单都按 rank（位置序）展示，unranked 只是不显示数字
+    let order = "rank IS NULL, rank, added_at";
     match app
         .db
         .select_json(&format!(
@@ -582,13 +589,7 @@ async fn list_item_rank(
             if src == "letterboxd" {
                 return Err(rusqlite::Error::InvalidParameterName("Letterboxd 镜像清单只读".into()));
             }
-            let ranked: i64 = c
-                .query_row("SELECT ranked FROM lists WHERE id=?1", rusqlite::params![id], |r| r.get(0))?;
-            if ranked == 0 {
-                return Err(rusqlite::Error::InvalidParameterName(
-                    "非排名清单没有名次可编辑".into(),
-                ));
-            }
+            // unranked 也维护顺序（位置即排序，仅不展示数字）
             let n = c.execute(
                 "UPDATE list_items SET rank=?3 WHERE list_id=?1 AND movie_id=?2",
                 rusqlite::params![id, movie_id, rank],
@@ -635,15 +636,12 @@ async fn tmdb_search(
         return (StatusCode::BAD_REQUEST, "缺少 q 参数").into_response();
     };
     let year = q.get("year").and_then(|s| s.parse::<i64>().ok());
-    let page = q.get("page").and_then(|s| s.parse::<i64>().ok()).unwrap_or(1);
-    match tools::execute(
-        "search_movies",
-        &tool_ctx(&app),
-        json!({"query": query, "year": year, "page": page}),
-    )
-    .await
-    {
-        Ok(v) => Json(v).into_response(),
+    let page = q.get("page").and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+    // 直接走共享搜索（不走 AI 工具的前 5 条截断，Search 页消费全量）
+    match betterboxd_core::tools::search_and_cache(&tool_ctx(&app), &query, year, page).await {
+        Ok((results, total_pages)) => {
+            Json(json!({"results": results, "total_pages": total_pages})).into_response()
+        }
         Err(e) => (StatusCode::BAD_GATEWAY, e).into_response(),
     }
 }

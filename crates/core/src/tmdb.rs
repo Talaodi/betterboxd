@@ -87,9 +87,9 @@ impl TmdbClient {
         Ok(body)
     }
 
-    /// 搜索影片：返回指定页的前 5 条 {tmdb_id, title, original_title, year, overview, poster_path}。
-    /// page 从 1 起；TMDB 每页 20 条，本函数固定取每页前 5 条（前端「更多」= page+1）。
-    pub async fn search_movie(&self, query: &str, year: Option<i64>, page: u32) -> Result<Vec<Value>, String> {
+    /// 搜索影片：返回指定页全部结果（≤20 条）{tmdb_id, title, original_title, year,
+    /// overview, poster_path}。page 从 1 起；前端「更多」= 页内切片，用尽再 page+1。
+    pub async fn search_movie(&self, query: &str, year: Option<i64>, page: u32) -> Result<(Vec<Value>, u32), String> {
         let q = urlencode(query);
         let mut query_str = format!("query={q}&include_adult=false&page={page}");
         if let Some(y) = year {
@@ -102,7 +102,6 @@ impl TmdbClient {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .take(5)
         {
             out.push(serde_json::json!({
                 "tmdb_id": r["id"],
@@ -113,7 +112,8 @@ impl TmdbClient {
                 "poster_path": r["poster_path"],
             }));
         }
-        Ok(out)
+        let total_pages = body["total_pages"].as_u64().unwrap_or(1).min(500) as u32;
+        Ok((out, total_pages))
     }
 
     /// 详情 + credits（一次请求拿导演/类型/时长等）。

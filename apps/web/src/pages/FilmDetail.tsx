@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { getJson, parseJsonArray, sendJson, type DiaryRow, type LogRow, type MovieRow } from "../api";
 import Poster from "../components/Poster";
 import DiaryEntryRow from "../components/DiaryEntryRow";
@@ -12,7 +12,15 @@ import { StarsDisplay, StarsEditor } from "../components/Stars";
 type Detail = {
   movie: MovieRow;
   logs: LogRow[];
-  lists: { list_id: string; name: string; rank: number | null; ranked: number }[];
+  lists: {
+    list_id: string;
+    name: string;
+    rank: number | null;
+    ranked: number;
+    updated_at: number;
+    item_count: number;
+    cover_movie_id: number | null;
+  }[];
 };
 
 type ListMetaLite = {
@@ -205,76 +213,6 @@ export default function FilmDetail() {
         </div>
       </div>
 
-      {/* List 归属区：竖排卡片（与 Log 板块同构）+ 加入清单下拉 */}
-      <div className="mt-8">
-        <p className="mb-1.5 px-2 text-xs font-medium tracking-widest text-[#5a6b7c]">LISTS</p>
-        <div className="border-t border-[#2c3440]">
-          {detail.lists.map((l) => (
-            <Link
-              key={l.list_id}
-              to={`/lists`}
-              className="flex items-baseline gap-3 border-b border-[#1e2630] px-2 py-2 hover:bg-[#1b222b]"
-            >
-              <span
-                className={
-                  "w-24 shrink-0 text-right text-sm font-bold " +
-                  (l.ranked && l.rank ? "text-[#ff8000]" : "text-[#8899aa]")
-                }
-              >
-                {l.ranked && l.rank ? `No.${l.rank} in` : "In"}
-              </span>
-              <span className="truncate text-sm text-[#c8d2dc]">{l.name}</span>
-            </Link>
-          ))}
-        </div>
-        <span className="relative mt-2 inline-block">
-          <button
-            className="rounded border border-[#456] px-2 py-1 text-xs text-[#8899aa] hover:text-white"
-            onClick={openListPicker}
-          >
-            + 加入 List
-          </button>
-          {showListPicker && (
-            <div className="absolute left-0 top-8 z-40 w-60 rounded-lg border border-[#33414f] bg-[#1b222b] p-2 shadow-xl">
-              {allLists.map((l) => {
-                const joined = detail.lists.some((x) => x.list_id === l.id);
-                return (
-                  <button
-                    key={l.id}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[#c8d2dc] hover:bg-[#2c3440] disabled:opacity-40"
-                    disabled={joined || l.source === "letterboxd"}
-                    onClick={() => addToList(l.id)}
-                  >
-                    <span className="truncate">
-                      {l.name}
-                      {l.ranked === 1 && (
-                        <span className="ml-1 text-[10px] text-[#5a6b7c]">排名</span>
-                      )}
-                    </span>
-                    {joined && <span className="text-[#00e054]">✓</span>}
-                  </button>
-                );
-              })}
-              <div className="mt-2 flex gap-1 border-t border-[#2c3440] pt-2">
-                <input
-                  placeholder="新清单名…"
-                  className="min-w-0 flex-1 rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-xs"
-                  value={newListName}
-                  onChange={(e) => setNewListName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && createAndAdd()}
-                />
-                <button
-                  className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
-                  onClick={createAndAdd}
-                >
-                  建
-                </button>
-              </div>
-            </div>
-          )}
-        </span>
-      </div>
-
       {/* Log 三板块竖排：Diary → Reviews → Chats，各板块内时间倒序，标题可折叠 */}
       <div className="mt-8 space-y-6">
         <LogSection
@@ -343,6 +281,96 @@ export default function FilmDetail() {
             ))}
           </div>
         </LogSection>
+      </div>
+      {/* LISTS 板块（report v2：排在 CHATS 后，复用 Lists 列表卡样式） */}
+      <div className="mt-8">
+        <p className="mb-1.5 px-2 text-xs font-medium tracking-widest text-[#5a6b7c]">LISTS</p>
+        <div className="border-t border-[#2c3440]">
+          {detail.lists.map((l) => (
+            <div
+              key={l.list_id}
+              className="flex cursor-pointer items-stretch gap-3 border-b border-[#1e2630] px-2 py-2 hover:bg-[#1b222b]"
+              onClick={() => navigate(`/lists/${l.list_id}`)}
+            >
+              <div className="w-14 shrink-0 self-center text-right">
+                <span
+                  className={
+                    "text-sm font-bold " +
+                    (l.ranked && l.rank ? "text-[#ff8000]" : "text-[#8899aa]")
+                  }
+                >
+                  {l.ranked && l.rank ? `No.${l.rank}` : "In"}
+                </span>
+              </div>
+              <div className="w-[48px] shrink-0 self-stretch bg-[#14181c]">
+                {l.cover_movie_id && (
+                  <Poster
+                    tmdbId={l.cover_movie_id}
+                    title=""
+                    size="grid"
+                    className="h-full! w-[48px]! rounded object-cover"
+                  />
+                )}
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col justify-center">
+                <h3 className="truncate text-base font-semibold">{l.name}</h3>
+                <p className="text-xs text-[#5a6b7c]">
+                  {new Date(l.updated_at * 1000).toISOString().slice(0, 10).replace(/-/g, "/")} ·{" "}
+                  {l.ranked === 1 ? "Ranked" : "Unranked"} · {l.item_count} 部
+                </p>
+              </div>
+            </div>
+          ))}
+          {detail.lists.length === 0 && (
+            <p className="px-2 py-2 text-sm text-[#5a6b7c]">尚未加入任何清单</p>
+          )}
+        </div>
+        <span className="relative mt-2 inline-block">
+          <button
+            className="rounded border border-[#456] px-2 py-1 text-xs text-[#8899aa] hover:text-white"
+            onClick={openListPicker}
+          >
+            + 加入 List
+          </button>
+          {showListPicker && (
+            <div className="absolute left-0 top-8 z-40 w-60 rounded-lg border border-[#33414f] bg-[#1b222b] p-2 shadow-xl">
+              {allLists.map((l) => {
+                const joined = detail.lists.some((x) => x.list_id === l.id);
+                return (
+                  <button
+                    key={l.id}
+                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-[#c8d2dc] hover:bg-[#2c3440] disabled:opacity-40"
+                    disabled={joined || l.source === "letterboxd"}
+                    onClick={() => addToList(l.id)}
+                  >
+                    <span className="truncate">
+                      {l.name}
+                      {l.ranked === 1 && (
+                        <span className="ml-1 text-[10px] text-[#5a6b7c]">排名</span>
+                      )}
+                    </span>
+                    {joined && <span className="text-[#00e054]">✓</span>}
+                  </button>
+                );
+              })}
+              <div className="mt-2 flex gap-1 border-t border-[#2c3440] pt-2">
+                <input
+                  placeholder="新清单名…"
+                  className="min-w-0 flex-1 rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-xs"
+                  value={newListName}
+                  onChange={(e) => setNewListName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createAndAdd()}
+                />
+                <button
+                  className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
+                  onClick={createAndAdd}
+                >
+                  建
+                </button>
+              </div>
+            </div>
+          )}
+        </span>
       </div>
       {showDiary && <DiaryModal movieId={m.tmdb_id} onClose={() => { setShowDiary(false); load(); }} onSaved={() => { setShowDiary(false); load(); }} />}
       {showReview && <ReviewModal movieId={m.tmdb_id} onClose={() => { setShowReview(false); load(); }} onSaved={() => { setShowReview(false); load(); }} />}

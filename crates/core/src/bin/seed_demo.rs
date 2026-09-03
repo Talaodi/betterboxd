@@ -541,7 +541,7 @@ async fn main() {
                 continue;
             }
         };
-        let Some(first) = results.first().cloned() else {
+        let Some(first) = results.0.first().cloned() else {
             eprintln!("  ⚠ {title} 无结果");
             continue;
         };

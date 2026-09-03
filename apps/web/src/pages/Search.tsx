@@ -1,6 +1,6 @@
-/** Search 页（report 修复版）：纵向行卡（类 Diary 布局），结果即入库（搜索时已建桩），
- *  点击直接进详情页；一次 5 条，底部「更多」每次 +5；防抖 400ms + 竞态守卫。 */
-import { useEffect, useRef, useState } from "react";
+/** Search 页（report v2）：手动触发（按钮/Enter）；整页拉取（≤20）+ 页内切片「更多」；
+ *  模块级缓存——点进详情返回后恢复搜索内容。 */
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getJson, posterUrl } from "../api";
 
@@ -13,29 +13,58 @@ type SearchResult = {
   poster_path?: string | null;
 };
 
+/** 模块级缓存：离开页面（进详情）不清空，返回时恢复 */
+const cache: {
+  q: string;
+  results: SearchResult[];
+  visible: number;
+  page: number;
+  totalPages: number;
+} | null = null;
+const saved: {
+  q: string;
+  results: SearchResult[];
+  visible: number;
+  page: number;
+  totalPages: number;
+} = { q: "", results: [], visible: 0, page: 0, totalPages: 0 };
+
+const PAGE_SIZE = 5;
+
 export default function Search() {
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [page, setPage] = useState(0); // 已加载的页数
-  const [hasMore, setHasMore] = useState(false);
+  const restored = saved.q !== "" || saved.results.length > 0;
+  const [q, setQ] = useState(restored ? saved.q : "");
+  const [results, setResults] = useState<SearchResult[]>(restored ? saved.results : []);
+  const [visible, setVisible] = useState(restored ? saved.visible : 0);
+  const [page, setPage] = useState(restored ? saved.page : 0);
+  const [totalPages, setTotalPages] = useState(restored ? saved.totalPages : 0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const navigate = useNavigate();
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seq = useRef(0);
+  void cache;
 
   const fetchPage = (query: string, nextPage: number, append: boolean) => {
     const my = ++seq.current;
     setLoading(true);
     setErr("");
-    getJson<{ results: SearchResult[] }>(
+    getJson<{ results: SearchResult[]; total_pages: number }>(
       `/api/tmdb/search?q=${encodeURIComponent(query.trim())}&page=${nextPage}`,
     )
       .then((d) => {
         if (my !== seq.current) return;
-        setResults((prev) => (append ? [...prev, ...d.results] : d.results));
+        const merged = append ? [...results, ...d.results] : d.results;
+        setResults(merged);
         setPage(nextPage);
-        setHasMore(d.results.length >= 5);
+        setTotalPages(d.total_pages);
+        setVisible(append ? visible : Math.min(PAGE_SIZE, d.results.length));
+        Object.assign(saved, {
+          q: query.trim(),
+          results: merged,
+          visible: append ? visible : Math.min(PAGE_SIZE, d.results.length),
+          page: nextPage,
+          totalPages: d.total_pages,
+        });
       })
       .catch((e) => {
         if (my === seq.current) setErr((e as Error).message);
@@ -45,34 +74,43 @@ export default function Search() {
       });
   };
 
-  useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      if (q.trim()) fetchPage(q, 1, false);
-      else {
-        setResults([]);
-        setPage(0);
-        setHasMore(false);
-      }
-    }, 400);
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  const search = () => {
+    if (!q.trim()) return;
+    fetchPage(q, 1, false);
+  };
+
+  const more = () => {
+    const nv = visible + PAGE_SIZE;
+    setVisible(nv);
+    Object.assign(saved, { ...saved, visible: nv });
+    // 页内切片用尽且还有下一页 → 后台补拉
+    if (nv > results.length && page < totalPages) fetchPage(q, page + 1, true);
+  };
+
+  const hasMore = visible < results.length || page < totalPages;
 
   return (
     <div className="mx-auto max-w-[1100px] px-6 pt-6 pb-10">
-      <input
-        autoFocus
-        placeholder="输入片名（中/英文）…"
-        className="w-full rounded border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-      />
+      <div className="flex gap-2">
+        <input
+          autoFocus
+          placeholder="输入片名（中/英文）…"
+          className="min-w-0 flex-1 rounded border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && search()}
+        />
+        <button
+          className="shrink-0 rounded bg-[#00e054] px-4 py-2 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
+          disabled={!q.trim() || loading}
+          onClick={search}
+        >
+          搜索
+        </button>
+      </div>
       {err && <p className="mt-3 text-sm text-[#ff8000]">{err}</p>}
       <div className="mt-4 border-t border-[#2c3440]">
-        {results.map((r) => (
+        {results.slice(0, visible).map((r) => (
           <button
             key={r.tmdb_id}
             className="flex w-full items-start gap-4 border-b border-[#1e2630] px-2 py-3 text-left hover:bg-[#1b222b]"
@@ -108,7 +146,7 @@ export default function Search() {
       {hasMore && !loading && (
         <button
           className="mt-4 block w-full rounded border border-[#456] py-2 text-sm text-[#8899aa] hover:text-white"
-          onClick={() => fetchPage(q, page + 1, true)}
+          onClick={more}
         >
           更多
         </button>

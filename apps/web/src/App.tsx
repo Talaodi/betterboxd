@@ -4,7 +4,7 @@ import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
 import Chats from "./pages/Chats";
 import Reviews from "./pages/Reviews";
-import Lists from "./pages/Lists";
+import Lists, { ListDetail } from "./pages/Lists";
 import Search from "./pages/Search";
 import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
@@ -59,6 +59,7 @@ export default function App() {
             <Route path="/search" element={<Search />} />
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/lists" element={<Lists />} />
+            <Route path="/lists/:id" element={<ListDetail />} />
             <Route path="/chats" element={<Chats />} />
             <Route path="/stats" element={<Stats />} />
             <Route path="/settings" element={<Settings />} />

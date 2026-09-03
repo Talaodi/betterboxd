@@ -368,8 +368,27 @@ SELECT r.id AS review_id, r.movie_id, r.title, r.body_md,
 FROM reviews r JOIN movies m ON m.tmdb_id = r.movie_id;
 "#;
 
+/// M007：my_rating 缓存全量重算对齐署名日期语义——M005 改了重算规则，但
+/// 重算仅在写操作时触发，未再被写过的影片仍残留旧"断言时序"缓存值
+/// （如无评分条目影片显示旧独立改分值）。一次性以目标行派生值刷新缓存。
+const M007: &str = r#"
+UPDATE movies SET my_rating = (
+    SELECT rating FROM (
+        SELECT e.rating AS rating, e.watched_date AS sig, e.updated_at AS upd
+          FROM diary_entries e
+         WHERE e.movie_id = movies.tmdb_id AND e.rating IS NOT NULL
+        UNION ALL
+        SELECT r.rating,
+               COALESCE(r.signature_date, strftime('%Y-%m-%d', r.created_at, 'unixepoch')) AS sig,
+               r.updated_at AS upd
+          FROM reviews r
+         WHERE r.movie_id = movies.tmdb_id AND r.rating IS NOT NULL
+    ) ORDER BY sig DESC, upd DESC LIMIT 1
+);
+"#;
+
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
-const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005)];
+const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (7, M007)];
 
 /// 当前最新 schema 版本（测试与启动校验用）。
 pub fn latest_version() -> i64 {

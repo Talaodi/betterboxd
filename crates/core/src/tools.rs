@@ -246,11 +246,14 @@ fn get_i64(v: &Value, k: &str) -> Option<i64> {
     v.get(k).and_then(|x| x.as_i64())
 }
 
-async fn search_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
-    let query = get_str(args, "query").ok_or("缺少 query")?;
-    let year = get_i64(args, "year");
-    let page = get_i64(args, "page").unwrap_or(1).clamp(1, 100) as u32;
-    let results = ctx
+/// 搜索 + 结果级建桩缓存（Search 页与 AI 工具共用；返回全量结果与总页数）。
+pub async fn search_and_cache(
+    ctx: &ToolCtx,
+    query: &str,
+    year: Option<i64>,
+    page: u32,
+) -> Result<(Vec<Value>, u32), String> {
+    let (results, total_pages) = ctx
         .tmdb
         .search_movie(query, year, page)
         .await
@@ -274,7 +277,21 @@ async fn search_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             .await
             .map_err(|e| e.to_string())?;
     }
-    Ok(json!({"results": results, "note": "已缓存候选；写记录会自动选中"}))
+    Ok((results, total_pages))
+}
+
+async fn search_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    let query = get_str(args, "query").ok_or("缺少 query")?;
+    let year = get_i64(args, "year");
+    let page = get_i64(args, "page").unwrap_or(1).clamp(1, 100) as u32;
+    let (results, total_pages) = search_and_cache(ctx, query, year, page).await?;
+    // 模型只需前 5 条；全量结果已入库缓存（Search 页分页消费）
+    let shown: Vec<Value> = results.iter().take(5).cloned().collect();
+    Ok(json!({
+        "results": shown,
+        "total_pages": total_pages,
+        "note": "已缓存候选；写记录会自动选中"
+    }))
 }
 
 async fn get_movie_details(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
@@ -639,19 +656,18 @@ async fn manage_lists(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
                     if src == "letterboxd" {
                         return Err(invalid("Letterboxd 镜像清单只读，不能添加条目".into()));
                     }
-                    let rank: Option<i64> = if ranked == 1 {
-                        match rank_req {
-                            Some(r) => Some(r),
-                            None => Some(
-                                c.query_row(
-                                    "SELECT COALESCE(MAX(rank),0)+1 FROM list_items WHERE list_id=?1",
-                                    rusqlite::params![id2],
-                                    |r| r.get(0),
-                                )?,
-                            ),
-                        }
-                    } else {
-                        None
+                    // 名次由位置生成（v1.2 report）：ranked/unranked 都维护顺序（队尾追加），
+                    // unranked 只是不展示数字。显式 rank 仅 ranked 清单接受。
+                    let _ = ranked;
+                    let rank: Option<i64> = match (ranked == 1, rank_req) {
+                        (true, Some(r)) => Some(r),
+                        _ => Some(
+                            c.query_row(
+                                "SELECT COALESCE(MAX(rank),0)+1 FROM list_items WHERE list_id=?1",
+                                rusqlite::params![id2],
+                                |r| r.get(0),
+                            )?,
+                        ),
                     };
                     c.execute(
                         "INSERT INTO list_items (list_id, movie_id, rank, added_at)
@@ -1623,7 +1639,7 @@ mod write_regression_tests {
     }
 
     #[tokio::test]
-    async fn lists_unranked_add_has_null_rank() {
+    async fn lists_unranked_also_keeps_order() {
         let (db, ctx) = setup_two_movies();
         let out = execute(
             "manage_lists",
@@ -1633,19 +1649,27 @@ mod write_regression_tests {
         .await
         .unwrap();
         let list_id = out["list_id"].as_str().unwrap().to_string();
+        // unranked 也维护位置顺序（队尾 rank），显式 rank 不接受
         execute("manage_lists", &ctx, json!({"action":"add_item","list_id":list_id,"movie_id":843,"rank":3}))
             .await
             .unwrap();
-        let rank: Option<i64> = db
+        execute("manage_lists", &ctx, json!({"action":"add_item","list_id":list_id,"movie_id":844}))
+            .await
+            .unwrap();
+        let ranks: Vec<(i64, Option<i64>)> = db
             .call({
                 let id = list_id.clone();
                 move |c| {
-                    c.query_row("SELECT rank FROM list_items WHERE list_id=?1", rusqlite::params![id], |r| r.get(0))
+                    let mut st = c.prepare("SELECT movie_id, rank FROM list_items WHERE list_id=?1 ORDER BY rank")?;
+                    let rows = st.query_map(rusqlite::params![id], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?))
+                    })?;
+                    rows.collect()
                 }
             })
             .await
             .unwrap();
-        assert_eq!(rank, None, "unranked 清单 rank 必须为 NULL（指定也不写）");
+        assert_eq!(ranks, vec![(843, Some(1)), (844, Some(2))], "unranked 按位置顺序");
         // 未知 action
         let err = execute("manage_lists", &ctx, json!({"action":"bogus"})).await.unwrap_err();
         assert!(err.contains("未知 action"));
