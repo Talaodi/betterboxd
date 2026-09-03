@@ -14,7 +14,8 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.3",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "remark-breaks": "^4.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
@@ -24,6 +25,7 @@
     "playwright": "^1.62.1",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "@tailwindcss/typography": "^0.5.20"
   }
 }

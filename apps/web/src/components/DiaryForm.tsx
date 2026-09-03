@@ -108,7 +108,7 @@ function AddTagPanel({
         />
         <datalist id={`tag-dl-${cat}`}>
           {pool
-            .filter((p) => !(existing[cat] ?? (cat === "自由标签" ? existing["自由标签"] ?? [] : [])).includes(p.name))
+            .filter((p) => !(existing[cat] ?? []).includes(p.name))
             .map((p) => (
               <option key={p.name} value={p.name} />
             ))}
@@ -215,13 +215,9 @@ export function DiaryForm({
         {data.in_theater && (
           <span className="flex items-center gap-1">
             票价 ¥
-            <input
-              type="number"
-              className="w-20 rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-              value={data.ticket_price_cents !== null ? data.ticket_price_cents / 100 : ""}
-              onChange={(e) =>
-                set({ ticket_price_cents: e.target.value === "" ? null : Math.round(Number(e.target.value) * 100) })
-              }
+            <PriceInput
+              cents={data.ticket_price_cents}
+              onChange={(cents) => set({ ticket_price_cents: cents })}
             />
           </span>
         )}
@@ -242,7 +238,7 @@ export function DiaryForm({
           {adding ? (
             <AddTagPanel
               taxonomy={taxonomy}
-              existing={data.dimensions}
+              existing={{ ...data.dimensions, 自由标签: data.tags }}
               onAdd={addValue}
               onClose={() => setAdding(false)}
             />
@@ -261,4 +257,30 @@ async function getTaxonomy(): Promise<Taxonomy> {
   const r = await fetch("/api/taxonomy");
   if (!r.ok) throw new Error(`${r.status}`);
   return r.json();
+}
+
+/** 票价输入：字符串中间态（修复受控归一化吞小数点：45. → 455），blur 时归一化为分。 */
+function PriceInput({
+  cents,
+  onChange,
+}: {
+  cents: number | null;
+  onChange: (cents: number | null) => void;
+}) {
+  const [raw, setRaw] = useState<string | null>(null); // null = 展示归一化值
+  const display = raw ?? (cents !== null ? String(cents / 100) : "");
+  return (
+    <input
+      type="number"
+      step="0.01"
+      className="w-20 rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
+      value={display}
+      onChange={(e) => setRaw(e.target.value)}
+      onBlur={() => {
+        const v = raw?.trim() ?? "";
+        onChange(v === "" ? null : Math.round(Number(v) * 100));
+        setRaw(null);
+      }}
+    />
+  );
 }

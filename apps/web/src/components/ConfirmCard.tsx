@@ -132,7 +132,8 @@ export default function ConfirmCard({
         if (a.dimensions && typeof a.dimensions === "object") {
           const dims: Record<string, string[]> = { ...fd.dimensions };
           for (const [k, v] of Object.entries(a.dimensions as Record<string, unknown>)) {
-            if (Array.isArray(v)) dims[k] = v.map(String);
+            // 三槽位白名单（情绪已清除）：AI 残留旧键会让确认后的更新被 ensure_dims 拒绝
+            if (Array.isArray(v) && ["地点", "场景", "同伴"].includes(k)) dims[k] = v.map(String);
           }
           fd.dimensions = dims;
         }

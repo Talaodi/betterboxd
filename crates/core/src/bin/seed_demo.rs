@@ -97,7 +97,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "家"), ("同伴", "独看"), ("情绪", "怅然")],
+        dims: &[("地点", "家"), ("同伴", "独看")],
         tags: &["墨镜王"],
         note: "加州梦与凤梨罐头，两段都爱。",
         created_shift_days: 0,
@@ -110,7 +110,7 @@ const E: &[EntryPlan] = &[
         theater: true,
         price: Some(4000),
         liked: false,
-        dims: &[("地点", "美嘉影城"), ("同伴", "小王"), ("情绪", "泪崩")],
+        dims: &[("地点", "美嘉影城"), ("同伴", "小王")],
         tags: &["补课"],
         note: "补 2016 年欠下的一张票。",
         created_shift_days: 2,
@@ -123,7 +123,7 @@ const E: &[EntryPlan] = &[
         theater: true,
         price: Some(4500),
         liked: false,
-        dims: &[("地点", "美嘉影城"), ("同伴", "独看"), ("情绪", "烧脑")],
+        dims: &[("地点", "美嘉影城"), ("同伴", "独看")],
         tags: &["奉俊昊"],
         note: "楼梯那场戏的结构感太强了。",
         created_shift_days: 0,
@@ -153,7 +153,7 @@ const E: &[EntryPlan] = &[
         theater: true,
         price: Some(4500),
         liked: false,
-        dims: &[("地点", "美嘉影城"), ("同伴", "老张"), ("情绪", "爽")],
+        dims: &[("地点", "美嘉影城"), ("同伴", "老张")],
         tags: &["多元宇宙"],
         note: "石头宇宙的对话意外地动人。",
         created_shift_days: 0,
@@ -166,7 +166,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "家"), ("同伴", "独看"), ("情绪", "治愈")],
+        dims: &[("地点", "家"), ("同伴", "独看")],
         tags: &["深夜场"],
         note: "二刷：这次注意到逗号与雨。",
         created_shift_days: 0,
@@ -179,7 +179,7 @@ const E: &[EntryPlan] = &[
         theater: true,
         price: Some(4000),
         liked: false,
-        dims: &[("地点", "美嘉影城"), ("同伴", "独看"), ("情绪", "烧脑")],
+        dims: &[("地点", "美嘉影城"), ("同伴", "独看")],
         tags: &["语言学"],
         note: "非线性时间观与中年的和解。",
         created_shift_days: 0,
@@ -192,7 +192,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "家"), ("同伴", "独看"), ("情绪", "怅然")],
+        dims: &[("地点", "家"), ("同伴", "独看")],
         tags: &["王家卫"],
         note: "重看：花样的时间从来不属于他们自己。",
         created_shift_days: 1,
@@ -235,7 +235,7 @@ const E: &[EntryPlan] = &[
         theater: true,
         price: Some(4000),
         liked: false,
-        dims: &[("地点", "电影资料馆"), ("同伴", "老张"), ("情绪", "怅然")],
+        dims: &[("地点", "电影资料馆"), ("同伴", "老张")],
         tags: &["A24"],
         note: "云淡风轻，后劲三天。",
         created_shift_days: 0,
@@ -248,7 +248,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "家"), ("同伴", "独看"), ("情绪", "治愈")],
+        dims: &[("地点", "家"), ("同伴", "独看")],
         tags: &[],
         note: "三刷。铁道那场仍然是全片最柔软的地方。",
         created_shift_days: 0,
@@ -261,7 +261,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "老张家"), ("同伴", "老张"), ("情绪", "爽")],
+        dims: &[("地点", "老张家"), ("同伴", "老张")],
         tags: &[],
         note: "在老张家投影重看，笑点依旧密集。",
         created_shift_days: 0,
@@ -291,7 +291,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "家"), ("同伴", "独看"), ("情绪", "烧脑")],
+        dims: &[("地点", "家"), ("同伴", "独看")],
         tags: &["二刷细节"],
         note: "二刷注意到了石头汉堡和进口水蜜桃。",
         created_shift_days: 0,
@@ -321,7 +321,7 @@ const E: &[EntryPlan] = &[
         theater: false,
         price: None,
         liked: false,
-        dims: &[("地点", "家"), ("同伴", "独看"), ("情绪", "怅然")],
+        dims: &[("地点", "家"), ("同伴", "独看")],
         tags: &[],
         note: "二刷：移民局的走廊比记忆里更长。",
         created_shift_days: 0,
@@ -521,8 +521,10 @@ async fn main() {
     );
 
     let conn = Connection::open(&db_path).expect("打开库失败");
-    apply_migrations(&conn).expect("迁移失败");
+    // FK 先于迁移开启：M006/M007 的级联语义（entry_dimensions CASCADE 等）依赖 FK 强制，
+    // 否则旧库跑 seed 时值池删除会留下孤儿关联行
     conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+    apply_migrations(&conn).expect("迁移失败");
 
     println!("拉取 {} 部影片元数据（250ms 限速）…", FILMS.len());
     let mut film_ids: Vec<i64> = vec![0; FILMS.len()];

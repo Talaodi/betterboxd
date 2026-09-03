@@ -14,7 +14,7 @@ pub const TOOL_FAIL_BREAKER: usize = 3;
 /// 视图 Schema 字典（Prompt 第 ③ 层；静态文本，AI 写对 SQL 的前提）。
 pub const SCHEMA_DICTIONARY: &str = r#"【统计视图字典（仅可查询以下视图）】
 v_movies: tmdb_id, title_zh, title_en, title_original, title_main, title_sub, year, release_date, runtime, original_language, genres(JSON数组), directors(JSON数组), tagline, overview, tmdb_rating(社区评分10分制), tmdb_votes, my_rating(0-100可空), watched(0/1), in_watchlist, liked
-v_diary_full: entry_id, movie_id, watched_date(YYYY-MM-DD), rating(0-100可空), in_theater, liked, ticket_price_cents(分), private_note, created_at(unix秒), rewatch_index(派生), title_main, title_sub, title_zh, title_en, year, runtime, genres, directors, my_rating, tags(JSON数组), dimensions_flat(JSON数组 [{dimension,name}]，dimension∈地点|同伴|情绪|场景)
+v_diary_full: entry_id, movie_id, watched_date(YYYY-MM-DD), rating(0-100可空), in_theater, liked, ticket_price_cents(分), private_note, created_at(unix秒), rewatch_index(派生), title_main, title_sub, title_zh, title_en, year, runtime, genres, directors, my_rating, tags(JSON数组), dimensions_flat(JSON数组 [{dimension,name}]，dimension∈地点|场景|同伴)
 v_reviews_full: review_id, movie_id, title, body_md, body_len, rating, liked, created_at, updated_at, title_zh, title_en, title_original, genres, directors, my_rating
 v_actions: id, movie_id, target(movie|diary_entry|review), target_id, at(unix秒), source(edit|standalone|agent|import|system), changes_json, is_active(目标行存活=1)
 v_logs: kind(watch|review|chat), id, movie_id, at(日期), brief
