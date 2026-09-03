@@ -19,18 +19,25 @@ export default function Search() {
   const [err, setErr] = useState("");
   const navigate = useNavigate();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 竞态守卫：慢响应不得覆盖新查询的结果
+  const seq = useRef(0);
 
   const search = (query: string) => {
     if (!query.trim()) {
       setResults(null);
       return;
     }
+    const my = ++seq.current;
     setErr("");
     getJson<{ results: SearchResult[] }>(
       `/api/tmdb/search?q=${encodeURIComponent(query.trim())}`,
     )
-      .then((d) => setResults(d.results))
-      .catch((e) => setErr((e as Error).message));
+      .then((d) => {
+        if (my === seq.current) setResults(d.results);
+      })
+      .catch((e) => {
+        if (my === seq.current) setErr((e as Error).message);
+      });
   };
 
   // 防抖 400ms

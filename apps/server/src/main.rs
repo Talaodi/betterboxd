@@ -606,10 +606,22 @@ async fn list_item_rank(
             if src == "letterboxd" {
                 return Err(rusqlite::Error::InvalidParameterName("Letterboxd 镜像清单只读".into()));
             }
-            c.execute(
+            let ranked: i64 = c
+                .query_row("SELECT ranked FROM lists WHERE id=?1", rusqlite::params![id], |r| r.get(0))?;
+            if ranked == 0 {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "非排名清单没有名次可编辑".into(),
+                ));
+            }
+            let n = c.execute(
                 "UPDATE list_items SET rank=?3 WHERE list_id=?1 AND movie_id=?2",
                 rusqlite::params![id, movie_id, rank],
             )?;
+            if n == 0 {
+                return Err(rusqlite::Error::InvalidParameterName(format!(
+                    "影片 {movie_id} 不在清单 {id} 中"
+                )));
+            }
             c.execute(
                 "UPDATE lists SET updated_at=?2 WHERE id=?1",
                 rusqlite::params![id, betterboxd_core::now()],

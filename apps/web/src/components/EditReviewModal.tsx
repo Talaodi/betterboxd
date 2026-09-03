@@ -41,18 +41,15 @@ export default function EditReviewModal({
 
   const submit = async (override: boolean) => {
     try {
-      await sendJson(`/api/reviews/${reviewId}`, "PUT", {
+      // 覆盖警告是 200 响应体，不是 HTTP 错误
+      const out = await sendJson<{ require_confirmation?: boolean }>(`/api/reviews/${reviewId}`, "PUT", {
         title,
         body_md: body,
         rating,
         liked,
         ...(override ? { override_confirmed: true } : {}),
       });
-      onSaved();
-      onClose();
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes("require_confirmation")) {
+      if (out?.require_confirmation && !override) {
         if (
           window.confirm(
             "此修改将覆盖更新的最终评分/喜欢状态，确定覆盖？（账目保留历史）",
@@ -62,9 +59,12 @@ export default function EditReviewModal({
         } else {
           setErr("已取消。如需保留最新评分，请勿修改评分/喜欢。");
         }
-      } else {
-        setErr(msg);
+        return;
       }
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
     }
   };
 

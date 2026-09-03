@@ -58,15 +58,12 @@ export default function EditDiaryModal({
   const submit = async (override: boolean) => {
     if (!data) return;
     try {
-      await sendJson(`/api/diary/${entryId}`, "PUT", {
+      // 注意：覆盖警告是 200 响应体（{require_confirmation:true}），不是 HTTP 错误
+      const out = await sendJson<{ require_confirmation?: boolean }>(`/api/diary/${entryId}`, "PUT", {
         ...data,
         ...(override ? { override_confirmed: true } : {}),
       });
-      onSaved();
-      onClose();
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes("require_confirmation")) {
+      if (out?.require_confirmation && !override) {
         if (
           window.confirm(
             "此修改将覆盖更新的最终评分/喜欢状态，确定覆盖？（账目保留历史）",
@@ -76,9 +73,12 @@ export default function EditDiaryModal({
         } else {
           setErr("已取消。如需保留最新评分，请勿修改评分字段。");
         }
-      } else {
-        setErr(msg);
+        return;
       }
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
     }
   };
 

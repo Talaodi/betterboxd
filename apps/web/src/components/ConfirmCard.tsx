@@ -171,6 +171,37 @@ export default function ConfirmCard({
   const [listRanked, setListRanked] = useState(() =>
     isListForm ? pending.args?.ranked === true : false,
   );
+  // update 回填现值（评审缺陷：rename-only 更新会把 description/ranked 重置）
+  const [listLoaded, setListLoaded] = useState<{
+    name: string;
+    description: string | null;
+    ranked: number;
+  } | null>(null);
+  const [listLoadErr, setListLoadErr] = useState("");
+  useEffect(() => {
+    if (!isListForm || action !== "update") return;
+    const id = String(pending.args?.list_id ?? "");
+    if (!id) {
+      setListLoadErr("缺少 list_id，无法回填清单");
+      return;
+    }
+    getJson<{ list: { name: string; description: string | null; ranked: number } }>(
+      `/api/lists/${id}`,
+    )
+      .then((d) => {
+        setListLoaded(d.list);
+        // 表单 = 现状 + 提议（模型未提供的键保持清单现值）
+        setListName((prev) => (pending.args?.name !== undefined ? prev : d.list.name));
+        setListDesc((prev) =>
+          pending.args?.description !== undefined ? prev : (d.list.description ?? ""),
+        );
+        setListRanked((prev) =>
+          pending.args?.ranked !== undefined ? prev : d.list.ranked === 1,
+        );
+      })
+      .catch((e) => setListLoadErr(`清单回填失败: ${(e as Error).message}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending.call_id]);
 
   const confirm = () => {
     if (isDelete) {
@@ -198,12 +229,24 @@ export default function ConfirmCard({
     } else if (isSqCreate) {
       onConfirm({ ...pending.args, name: sqName.trim() || "未命名统计" });
     } else if (isListForm) {
-      onConfirm({
-        ...pending.args,
-        name: listName.trim(),
-        description: listDesc,
-        ranked: listRanked,
-      });
+      if (action === "update" && listLoaded) {
+        // presence 语义：只提交相对现值有变化的键（防确认卡重置未提及字段）
+        const patch: Record<string, unknown> = {
+          action: "update",
+          list_id: pending.args?.list_id,
+        };
+        if (listName.trim() !== listLoaded.name) patch.name = listName.trim();
+        if (listDesc !== (listLoaded.description ?? "")) patch.description = listDesc;
+        if (listRanked !== (listLoaded.ranked === 1)) patch.ranked = listRanked;
+        onConfirm(patch);
+      } else {
+        onConfirm({
+          ...pending.args,
+          name: listName.trim(),
+          description: listDesc,
+          ranked: listRanked,
+        });
+      }
     } else {
       onConfirm(pending.args);
     }
@@ -368,9 +411,18 @@ export default function ConfirmCard({
   if (isListForm) {
     return (
       <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
-        <p className="mb-3 text-sm font-medium text-[#ff8000]">
-          ✎ 待确认 · {action === "create" ? "新建清单" : "修改清单"}
-        </p>
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-medium text-[#ff8000]">
+            ✎ 待确认 · {action === "create" ? "新建清单" : "修改清单"}
+          </span>
+          <span className="text-xs text-[#5a6b7c]">
+            {action === "update" ? "仅提交你改动的字段" : "可编辑后确认"}
+          </span>
+        </div>
+        {listLoadErr && <p className="mb-2 text-sm text-[#ff8000]">{listLoadErr}</p>}
+        {action === "update" && !listLoaded && !listLoadErr && (
+          <p className="mb-2 text-sm text-[#5a6b7c]">正在回填清单现状…</p>
+        )}
         <div className="space-y-2">
           <input
             placeholder="清单名"
@@ -396,8 +448,9 @@ export default function ConfirmCard({
         </div>
         <div className="mt-3 flex gap-2">
           <button
-            className="rounded bg-[#00e054] px-3 py-1.5 text-sm font-medium text-[#0c1a10]"
+            className="rounded bg-[#00e054] px-3 py-1.5 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
             onClick={confirm}
+            disabled={action === "update" && !listLoaded}
           >
             确认执行
           </button>

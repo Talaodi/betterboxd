@@ -607,6 +607,24 @@ async fn manage_lists(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             let movie_id = get_i64(&args, "movie_id").ok_or("缺少 movie_id")?;
             let rank_req = get_i64(&args, "rank");
             let _ = ensure_movie_details(&ctx.tmdb, &ctx.db, movie_id).await;
+            // FK 友好化：影片不在库（模型编造 id / 未先 search_movies）→ 中文报错
+            let in_db = ctx
+                .db
+                .call(move |c| {
+                    Ok(c.query_row(
+                        "SELECT 1 FROM movies WHERE tmdb_id=?1",
+                        rusqlite::params![movie_id],
+                        |_| Ok(()),
+                    )
+                    .is_ok())
+                })
+                .await
+                .unwrap_or(false);
+            if !in_db {
+                return Err(format!(
+                    "影片 {movie_id} 不在本地库，请先 search_movies 建条目"
+                ));
+            }
             let id2 = id.clone();
             ctx.db
                 .call(move |c| {
@@ -1679,6 +1697,28 @@ mod write_regression_tests {
             .await
             .unwrap();
         assert_eq!(n2, 0, "删除清单级联清空条目");
+    }
+
+    #[tokio::test]
+    async fn lists_add_item_unknown_movie_friendly_error() {
+        let (_db, ctx) = setup_two_movies();
+        let out = execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"create","name":"FK 测试"}),
+        )
+        .await
+        .unwrap();
+        let list_id = out["list_id"].as_str().unwrap().to_string();
+        // 影片 99999 不在库 → 中文报错（非裸 FK 约束错误）
+        let err = execute(
+            "manage_lists",
+            &ctx,
+            json!({"action":"add_item","list_id":list_id,"movie_id":99999}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("不在本地库"), "应友好报错: {err}");
     }
 
     #[tokio::test]
