@@ -368,10 +368,15 @@ SELECT r.id AS review_id, r.movie_id, r.title, r.body_md,
 FROM reviews r JOIN movies m ON m.tmdb_id = r.movie_id;
 "#;
 
-/// M007：my_rating 缓存全量重算对齐署名日期语义——M005 改了重算规则，但
+/// M006：my_rating 缓存全量重算对齐署名日期语义——M005 改了重算规则，但
 /// 重算仅在写操作时触发，未再被写过的影片仍残留旧"断言时序"缓存值
-/// （如无评分条目影片显示旧独立改分值）。一次性以目标行派生值刷新缓存。
-const M007: &str = r#"
+/// （如无评分条目影片显示旧独立改分值）。一次性以目标行派生值刷新缓存；
+/// 同时回填 list_items.rank 空值（unranked 遗留行按 added_at 顺序接尾，
+/// 否则队尾追加会排到 NULL 行之前）。
+/// 版本号说明：版本 6 在此占用；design-next P3 的情绪维度清除届时用版本 7。
+/// （评审：迁移版本不能"预留"——apply_migrations 只跑 version > current，
+/// 已到 7 的库将来插入版本 6 会被永久跳过。）
+const M006: &str = r#"
 UPDATE movies SET my_rating = (
     SELECT rating FROM (
         SELECT e.rating AS rating, e.watched_date AS sig, e.updated_at AS upd
@@ -385,10 +390,26 @@ UPDATE movies SET my_rating = (
          WHERE r.movie_id = movies.tmdb_id AND r.rating IS NOT NULL
     ) ORDER BY sig DESC, upd DESC LIMIT 1
 );
+
+-- 遗留 NULL rank 回填：按 added_at 顺序接在各清单现有最大 rank 之后
+WITH base AS (
+    SELECT list_id, COALESCE(MAX(CASE WHEN rank IS NOT NULL THEN rank END), 0) AS maxr
+    FROM list_items GROUP BY list_id
+),
+nulls AS (
+    SELECT li.list_id, li.movie_id,
+           base.maxr + ROW_NUMBER() OVER (PARTITION BY li.list_id ORDER BY li.added_at) AS newrank
+    FROM list_items li JOIN base ON base.list_id = li.list_id
+    WHERE li.rank IS NULL
+)
+UPDATE list_items
+SET rank = (SELECT newrank FROM nulls
+             WHERE nulls.list_id = list_items.list_id AND nulls.movie_id = list_items.movie_id)
+WHERE rank IS NULL;
 "#;
 
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
-const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (7, M007)];
+const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (6, M006)];
 
 /// 当前最新 schema 版本（测试与启动校验用）。
 pub fn latest_version() -> i64 {

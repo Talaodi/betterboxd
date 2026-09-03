@@ -14,13 +14,6 @@ type SearchResult = {
 };
 
 /** 模块级缓存：离开页面（进详情）不清空，返回时恢复 */
-const cache: {
-  q: string;
-  results: SearchResult[];
-  visible: number;
-  page: number;
-  totalPages: number;
-} | null = null;
 const saved: {
   q: string;
   results: SearchResult[];
@@ -42,7 +35,6 @@ export default function Search() {
   const [err, setErr] = useState("");
   const navigate = useNavigate();
   const seq = useRef(0);
-  void cache;
 
   const fetchPage = (query: string, nextPage: number, append: boolean) => {
     const my = ++seq.current;
@@ -57,14 +49,20 @@ export default function Search() {
         setResults(merged);
         setPage(nextPage);
         setTotalPages(d.total_pages);
-        setVisible(append ? visible : Math.min(PAGE_SIZE, d.results.length));
-        Object.assign(saved, {
-          q: query.trim(),
-          results: merged,
-          visible: append ? visible : Math.min(PAGE_SIZE, d.results.length),
-          page: nextPage,
-          totalPages: d.total_pages,
-        });
+        // append 分支不动 visible（增量已在 more() 应用；闭包里是旧值，回写会回退）
+        if (append) {
+          Object.assign(saved, { results: merged, page: nextPage, totalPages: d.total_pages });
+        } else {
+          const nv = Math.min(PAGE_SIZE, d.results.length);
+          setVisible(nv);
+          Object.assign(saved, {
+            q: query.trim(),
+            results: merged,
+            visible: nv,
+            page: nextPage,
+            totalPages: d.total_pages,
+          });
+        }
       })
       .catch((e) => {
         if (my === seq.current) setErr((e as Error).message);
@@ -83,8 +81,8 @@ export default function Search() {
     const nv = visible + PAGE_SIZE;
     setVisible(nv);
     Object.assign(saved, { ...saved, visible: nv });
-    // 页内切片用尽且还有下一页 → 后台补拉
-    if (nv > results.length && page < totalPages) fetchPage(q, page + 1, true);
+    // 页内切片用尽且还有下一页 → 后台补拉；用已搜索关键词（输入框可能已漂移）
+    if (nv > results.length && page < totalPages) fetchPage(saved.q, page + 1, true);
   };
 
   const hasMore = visible < results.length || page < totalPages;

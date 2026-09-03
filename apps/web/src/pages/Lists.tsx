@@ -322,11 +322,11 @@ export function ListDetail() {
                 ⠿
               </span>
             )}
-            <img
-              src={`/api/poster/${it.tmdb_id}`}
-              onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
-              className="h-[63px] w-[42px] shrink-0 rounded bg-[#14181c] object-cover"
-              alt=""
+            <Poster
+              tmdbId={it.tmdb_id}
+              title={it.title_main}
+              size="grid"
+              className="h-[63px]! w-[42px]! shrink-0 rounded object-cover"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate text-base font-semibold">
