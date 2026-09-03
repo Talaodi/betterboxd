@@ -160,7 +160,8 @@ pub async fn run(
          并用自然语言+图标（📈🏆✨等）解读结果，禁止裸贴 JSON/表格；\
          ③用户随口求统计→解读完主动问「要保存为统计项目吗」；\
          ④用户明确要建统计项目→直接调 manage_saved_queries(create)\
-         （确认卡会展示名称+SQL）；⑤SQL 执行报错时自行修正重试（最多2次）。\
+         （确认卡会展示名称+SQL）；⑤SQL 执行报错时自行修正重试（最多2次）；\
+         ⑥能用 SQL 聚合的（计数/均值/排序/窗口）一律 run_stats；主观/文本分析（风格、情感、主题、写作特点）→ lookup_diary/lookup_reviews 取样阅读后自行总结，禁止用 run_stats 硬算文本字段。\
          展示表格用标准 GFM 语法：表头行与分隔行都以 | 开头结尾，分隔行只含 | 和 -（如 |---|---|），禁用 + 连接。\n\
          【日期解析铁律】用户消息中的四位数字年份（如 2016）几乎总是影片上映年份，\
          绝不是观看日期！观看日期必须：用户明说日期→用之；（今天、昨天等相对词）→以【当前日期】为基准换算成真实日期；\
@@ -170,6 +171,13 @@ pub async fn run(
         today.format("%Y-%m-%d"),
         weekday_cn
     );
+    // 画像智能注入（P4.2）：所有 scope 生效；快照轻量（get_profile_snapshot 工具保留供复查）
+    if let Ok(p) = tools::profile_snapshot(db).await {
+        system.push_str(&format!(
+            "\n【你的影迷画像（用户本人的观影档案快照）】{}",
+            serde_json::to_string(&p).unwrap_or_default()
+        ));
+    }
     if !context_injection.is_empty() {
         system.push_str(&format!("\n【当前上下文】\n{context_injection}"));
     }
@@ -346,4 +354,57 @@ pub async fn run(
         aborted_reason = Some(format!("达到最大步数 {MAX_STEPS}"));
     }
     Err(aborted_reason.unwrap_or_else(|| "Agent 异常终止".into()))
+}
+
+/// 会话开场白（P4 补充 1）：新 movie 系会话建立后，服务端主动生成第一条引导消息。
+/// 不走完整 agent loop（无工具），把注入上下文复述成自然引导；流式经 on_event 推送。
+pub async fn opening_message(
+    client: &ChatClient,
+    _config: &Config,
+    db: &DbHandle,
+    context_injection: &str,
+    cancel: CancellationToken,
+    mut on_event: impl FnMut(AgentEvent) + Send,
+) -> Result<(String, (u64, u64)), String> {
+    let today = chrono::Local::now();
+    let weekday_cn = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+        [today.weekday().num_days_from_sunday() as usize];
+    let mut system = format!(
+        "你是 Betterboxd，一位中文影迷的观影数据助手。平等、简明、不谄媚。\n\
+         【当前日期】{}（{}）。\n\
+         用户刚进入一个新会话，请发出第一条消息主动开启话题：基于下方上下文，\
+         用 2-4 句话点出这部片/这条记录/这篇影评的要点（评分、日期、关键维度等你看到的事实），\
+         再抛出一个具体的讨论方向（问句收尾）。不要罗列全部数据，不要用列表，像朋友聊天一样自然。\
+         直接输出消息正文，不要任何前缀或解释。",
+        today.format("%Y-%m-%d"),
+        weekday_cn
+    );
+    if let Ok(p) = tools::profile_snapshot(db).await {
+        system.push_str(&format!(
+            "\n【你的影迷画像（用户本人的观影档案快照）】{}",
+            serde_json::to_string(&p).unwrap_or_default()
+        ));
+    }
+    if !context_injection.is_empty() {
+        system.push_str(&format!("\n【当前上下文】\n{context_injection}"));
+    }
+    let mut emit = |t: &str| {
+        on_event(AgentEvent {
+            kind: AgentEventKind::Token(t.into()),
+        })
+    };
+    let o = client
+        .chat_stream(
+            &[json!({"role": "system", "content": system})],
+            None,
+            None,
+            &cancel,
+            &mut emit,
+        )
+        .await?;
+    let usage = (
+        o.usage.as_ref().and_then(|u| u.prompt_tokens).unwrap_or(0),
+        o.usage.as_ref().and_then(|u| u.completion_tokens).unwrap_or(0),
+    );
+    Ok((o.text, usage))
 }

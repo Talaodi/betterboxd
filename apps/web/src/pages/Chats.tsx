@@ -22,6 +22,10 @@ type PendingNew = {
   key: number;
   movieId?: number;
   movieTitle?: string | null;
+  entryId?: string;
+  reviewId?: string;
+  /** 面板头：讨论对象说明（条目日期/影评标题） */
+  subject?: string;
 };
 
 export default function Chats() {
@@ -38,14 +42,61 @@ export default function Chats() {
   }, []);
   useEffect(loadChats, [loadChats]);
 
-  // URL 入口：?open=<id> 直达会话；?new_movie=<id> 新建影片主题会话
+  // URL 入口：?open=<id> 直达会话；?new_movie/new_entry/new_review 新建对应主题会话
   useEffect(() => {
     const o = searchParams.get("open");
     const nm = searchParams.get("new_movie");
+    const ne = searchParams.get("new_entry");
+    const nr = searchParams.get("new_review");
     if (o) {
       setOpenId(o);
       setPendingNew(null);
       setSearchParams({}, { replace: true });
+    } else if (ne && /^[0-9a-f-]+$/.test(ne)) {
+      setTab("movies");
+      setOpenId(null);
+      setPendingNew({ key: Date.now(), entryId: ne });
+      setSearchParams({}, { replace: true });
+      // 拉条目信息做面板头（日期+片名）
+      getJson<{ entry: { movie_id: number; watched_date: string; title_main?: string } }>(
+        `/api/diary/${ne}`,
+      )
+        .then((d) => {
+          const e = d.entry;
+          setPendingNew((p) =>
+            p && p.entryId === ne
+              ? {
+                  ...p,
+                  movieId: e.movie_id,
+                  movieTitle: e.title_main ?? null,
+                  subject: `${e.title_main ?? "影片"} · ${e.watched_date} 观看记录`,
+                }
+              : p,
+          );
+        })
+        .catch(() => {});
+    } else if (nr && /^[0-9a-f-]+$/.test(nr)) {
+      setTab("movies");
+      setOpenId(null);
+      setPendingNew({ key: Date.now(), reviewId: nr });
+      setSearchParams({}, { replace: true });
+      getJson<{ review: { movie_id: number; title: string; title_main?: string } }>(
+        `/api/reviews/${nr}`,
+      )
+        .then((d) => {
+          const r = d.review;
+          setPendingNew((p) =>
+            p && p.reviewId === nr
+              ? {
+                  ...p,
+                  movieId: r.movie_id,
+                  movieTitle: r.title_main ?? null,
+                  subject: `影评「${r.title || "无题"}」`,
+                }
+              : p,
+          );
+        })
+        .catch(() => {});
     } else if (nm && /^\d+$/.test(nm)) {
       const mid = Number(nm);
       setTab("topic");
@@ -74,7 +125,8 @@ export default function Chats() {
 
   const listed = (chats ?? []).filter((c) => {
     if (tab === "all") return true;
-    if (tab === "movies") return c.scope === "movie";
+    // P4.1：scope 统一 movie（Diary/Review 入口同样归属），按 movie_id 非空过滤
+    if (tab === "movies") return c.movie_id !== null;
     if (!anchor) return true;
     return anchor.scope === "movie"
       ? c.scope === "movie" && c.movie_id === anchor.movie_id
@@ -150,10 +202,14 @@ export default function Chats() {
               key={`new-${pendingNew.key}`}
               freshKey={`new-${pendingNew.key}`}
               movieId={pendingNew.movieId}
+              entryId={pendingNew.entryId}
+              reviewId={pendingNew.reviewId}
               header={
-                pendingNew.movieId
-                  ? `💬 ${pendingNew.movieTitle ?? "影片"} · 新会话`
-                  : "控制台 · 新会话"
+                pendingNew.subject
+                  ? `💬 ${pendingNew.subject} · 新会话`
+                  : pendingNew.movieId
+                    ? `💬 ${pendingNew.movieTitle ?? "影片"} · 新会话`
+                    : "控制台 · 新会话"
               }
               hint={
                 pendingNew.movieTitle

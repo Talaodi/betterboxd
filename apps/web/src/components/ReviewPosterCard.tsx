@@ -4,12 +4,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Poster from "./Poster";
+import { useNavigate } from "react-router-dom";
 import { StarsDisplay } from "./Stars";
 import { Markdown } from "./ChatPanel";
 
 const POSTER_H = 168;
 
 export type ReviewCardData = {
+  review_id?: string;
   title: string | null;
   body_md: string;
   rating: number | null;
@@ -35,6 +37,7 @@ export default function ReviewPosterCard({
   /** P2：打开编辑弹窗（✎） */
   onEdit?: () => void;
 }) {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   // 内容实际高度 ≤ 收起高度 → 短文，无需展开按钮
   const [overflow, setOverflow] = useState(false);
@@ -87,6 +90,15 @@ export default function ReviewPosterCard({
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-xs">
+                <button
+                  className="text-[#5a6b7c] hover:text-[#00e054]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate(`/chats?new_review=${review.review_id}`);
+                  }}
+                >
+                  💬 AI
+                </button>
                 {onEdit && (
                   <button
                     className="text-[#5a6b7c] hover:text-[#40bcf4]"

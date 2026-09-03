@@ -61,6 +61,29 @@ impl SessionStore {
         })
     }
 
+    /// 按列值找最近会话（P4.1：entry_id/review_id 匹配恢复）。
+    pub async fn find_by_column(&self, column: &str, value: &str) -> Option<ChatSession> {
+        assert!(column == "entry_id" || column == "review_id");
+        let (column, value) = (column.to_string(), value.to_string());
+        let id: Option<String> = self
+            .db
+            .call(move |c| {
+                Ok(c.query_row(
+                    &format!(
+                        "SELECT id FROM chat_sessions WHERE {column}=?1
+                         ORDER BY last_message_at DESC LIMIT 1"
+                    ),
+                    rusqlite::params![value],
+                    |r| r.get::<_, String>(0),
+                )
+                .ok())
+            })
+            .await
+            .ok()
+            .flatten();
+        self.load(&id?)
+    }
+
     /// 找某 scope（+可选 movie）最近的一个会话并加载（WS 断线/刷新后恢复）。
     pub async fn find_latest(&self, scope: &str, movie_id: Option<i64>) -> Option<ChatSession> {
         let (scope, movie_id) = (scope.to_string(), movie_id);

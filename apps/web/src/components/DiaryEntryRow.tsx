@@ -73,8 +73,18 @@ export default function DiaryEntryRow({
         <div className="w-10 shrink-0 text-center">
           {entry.liked === 1 && <span className="text-[#00e054]">♥</span>}
         </div>
-        {/* 编辑/删除 */}
-        <div className="flex w-16 shrink-0 justify-end gap-3 pr-2 text-[#5a6b7c]">
+        {/* 讨论/编辑/删除 */}
+        <div className="flex w-24 shrink-0 justify-end gap-3 pr-2 text-[#5a6b7c]">
+          <span
+            className="cursor-pointer hover:text-[#00e054]"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/chats?new_entry=${entry.entry_id}`);
+            }}
+            title="与 AI 讨论这条记录"
+          >
+            💬
+          </span>
           <span
             className="cursor-pointer hover:text-[#40bcf4]"
             onClick={(e) => {

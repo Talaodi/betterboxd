@@ -116,6 +116,48 @@ impl TmdbClient {
         Ok((out, total_pages))
     }
 
+    /// 人物搜索：返回最匹配的一个 (person_id, name)（无人命中 None）。
+    pub async fn person_search(&self, query: &str) -> Result<Option<(i64, String)>, String> {
+        let q = urlencode(query);
+        let body = self.get("/search/person", &format!("query={q}&include_adult=false")).await?;
+        Ok(body["results"].as_array()
+            .and_then(|a| a.first())
+            .map(|r| (r["id"].as_i64().unwrap_or(0), r["name"].as_str().unwrap_or("").to_string())))
+    }
+
+    /// 人物电影作品（cast+directing 合并去重，按 popularity 降序）：
+    /// {tmdb_id, title, year, rating(10 分制), popularity, job}。
+    pub async fn person_movie_credits(&self, person_id: i64) -> Result<Vec<Value>, String> {
+        let body = self.get(&format!("/person/{person_id}/movie_credits"), "").await?;
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for (key, job) in [("cast", "出演"), ("crew", "导演")] {
+            for r in body[key].as_array().cloned().unwrap_or_default() {
+                if key == "crew" && r["job"].as_str() != Some("Director") {
+                    continue;
+                }
+                let id = r["id"].as_i64().unwrap_or(0);
+                if !seen.insert(id) {
+                    continue;
+                }
+                out.push(serde_json::json!({
+                    "tmdb_id": id,
+                    "title": r["title"],
+                    "year": r["release_date"].as_str().map(|s| &s[..4.min(s.len())]),
+                    "rating": r["vote_average"],
+                    "popularity": r["popularity"],
+                    "job": job,
+                }));
+            }
+        }
+        out.sort_by(|a, b| {
+            let pa = a["popularity"].as_f64().unwrap_or(0.0);
+            let pb = b["popularity"].as_f64().unwrap_or(0.0);
+            pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Ok(out)
+    }
+
     /// 详情 + credits（一次请求拿导演/类型/时长等）。
     pub async fn movie_details(&self, tmdb_id: i64) -> Result<Value, String> {
         self.get(&format!("/movie/{tmdb_id}"), "append_to_response=credits")

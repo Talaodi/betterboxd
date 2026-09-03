@@ -969,6 +969,10 @@ async fn tools_execute(State(app): State<App>, Json(args): Json<serde_json::Valu
 #[derive(Deserialize)]
 struct WsChatQuery {
     movie_id: Option<i64>,
+    /// 讨论某 Diary 条目（P4.1）：注入条目全文+Action 史；movie_id 从条目行派生
+    entry_id: Option<String>,
+    /// 讨论某影评（P4.1）：注入影评全文+Action 史；movie_id 从影评行派生
+    review_id: Option<String>,
     /// 按 session id 精确恢复（Chats 页打开指定会话）
     session_id: Option<String>,
     /// 跳过恢复，强制开新会话（控制台「新对话」按钮）
@@ -981,17 +985,27 @@ async fn ws_chat(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let movie_id = q.movie_id;
+    let entry_id = q
+        .entry_id
+        .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    let review_id = q
+        .review_id
+        .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
     let session_id = q
         .session_id
         .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
     let fresh = matches!(q.fresh.as_deref(), Some("1") | Some("true"));
-    ws.on_upgrade(move |socket| handle_chat(app, socket, movie_id, session_id, fresh))
+    ws.on_upgrade(move |socket| {
+        handle_chat(app, socket, movie_id, entry_id, review_id, session_id, fresh)
+    })
 }
 
 async fn handle_chat(
     app: App,
     socket: WebSocket,
     ws_movie_id: Option<i64>,
+    ws_entry_id: Option<String>,
+    ws_review_id: Option<String>,
     ws_session_id: Option<String>,
     fresh: bool,
 ) {
@@ -1007,19 +1021,56 @@ async fn handle_chat(
         }
     });
 
-    // 会话恢复优先级：session_id 精确恢复 > 同 scope 最近会话 > 新建
+    // 恢复优先级：session_id 精确恢复 > entry/review 匹配（P4.1）> 同 movie 最近 > 新建。
+    // scope 统一 "movie"（用户裁定：详情页/Diary/Review 入口不分 scope），entry_id/review_id 仅决定注入内容。
     let resumed = if fresh {
         None
     } else if let Some(sid) = &ws_session_id {
         app.sessions.load(sid)
+    } else if let Some(eid) = &ws_entry_id {
+        app.sessions.find_by_column("entry_id", eid).await
+    } else if let Some(rid) = &ws_review_id {
+        app.sessions.find_by_column("review_id", rid).await
     } else {
         let scope = if ws_movie_id.is_some() { "movie" } else { "global" };
         app.sessions.find_latest(scope, ws_movie_id).await
     };
-    let mut current = resumed.unwrap_or_else(|| match ws_movie_id {
-        Some(mid) => app.sessions.new_session("movie", Some(mid), None, None),
-        None => app.sessions.new_session("global", None, None, None),
-    });
+    // 新建：entry/review 入口的 movie_id 从行派生（WS 不要求同时传 movie_id）
+    let is_fresh_session = resumed.is_none();
+    let mut current = match resumed {
+        Some(s) => s,
+        None => {
+            let derive_mid = |sql: String, id: String| {
+                let db = app.db.clone();
+                async move {
+                    db.select_json_params(sql, vec![betterboxd_core::db::SqlVal::Text(id)])
+                        .await
+                        .ok()
+                        .and_then(|r| r.first().and_then(|x| x["movie_id"].as_i64()))
+                }
+            };
+            if let Some(mid) = ws_movie_id {
+                app.sessions
+                    .new_session("movie", Some(mid), ws_entry_id.clone(), ws_review_id.clone())
+            } else if let Some(eid) = ws_entry_id {
+                let mid = derive_mid(
+                    "SELECT movie_id FROM diary_entries WHERE id=?1".into(),
+                    eid.clone(),
+                )
+                .await;
+                app.sessions.new_session("movie", mid, Some(eid), None)
+            } else if let Some(rid) = ws_review_id {
+                let mid = derive_mid(
+                    "SELECT movie_id FROM reviews WHERE id=?1".into(),
+                    rid.clone(),
+                )
+                .await;
+                app.sessions.new_session("movie", mid, None, Some(rid))
+            } else {
+                app.sessions.new_session("global", None, None, None)
+            }
+        }
+    };
     // 恢复的会话自带 movie 归属——上下文注入跟随会话而非查询参数
     let session_movie_id = current.movie_id;
     let hello = serde_json::json!({"type": "hello", "session_id": current.id});
@@ -1027,29 +1078,101 @@ async fn handle_chat(
 
     let cancel: Arc<Mutex<Option<CancellationToken>>> = Arc::new(Mutex::new(None));
 
-    'outer: loop {
-        // —— 空闲态：等待用户消息 ——
-        let Some(Ok(Message::Text(text))) = stream.next().await else {
-            break 'outer;
-        };
-        let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text) else {
-            continue;
-        };
-        if frame["type"].as_str() == Some("confirm") {
-            route_confirm(&app, &frame);
-            continue;
-        }
-        if frame["type"].as_str() != Some("user") {
-            continue;
-        }
-        let Some(user_text) = frame["text"].as_str().map(String::from) else {
-            continue;
-        };
-        let token = CancellationToken::new();
-        *cancel.lock().unwrap() = Some(token.clone());
-
-        // 构建 movie 上下文注入（scope=movie 时）
-    let context_injection = if let Some(mid) = session_movie_id {
+    // 上下文注入（P4.1）：entry/review scope = 条目/影评全文 + Action 史 + 影片元数据；
+    // movie scope = 影片元数据 + 最近记录（现状）。注入对每轮生效；开场白亦基于此。
+    let context_injection = if let Some(eid) = &current.entry_id {
+        let mut ctx_parts = Vec::new();
+        if let Ok(rows) = app.db.select_json(&format!(
+            "SELECT * FROM v_diary_full WHERE entry_id='{}'", eid.replace('\'', "")
+        )).await
+            && let Some(d) = rows.first() {
+                let dims = d["dimensions_flat"].as_str().unwrap_or("[]");
+                let tags = d["tags"].as_str().unwrap_or("[]");
+                ctx_parts.push(format!(
+                    "讨论对象：一条观影记录——\n影片: {}（{}）\n观看日期: {}（第{}次观看）\n当次评分: {}\n影院观影: {}，票价: {}\n随记: {}\n维度标注: {}\n标签: {}",
+                    d["title_main"].as_str().unwrap_or("?"),
+                    d["year"].as_str().unwrap_or(""),
+                    d["watched_date"].as_str().unwrap_or("?"),
+                    d["rewatch_index"].as_i64().unwrap_or(1),
+                    d["rating"].as_i64().map(|r| format!("{r}/100")).unwrap_or("未评".into()),
+                    if d["in_theater"].as_i64() == Some(1) { "是" } else { "否" },
+                    d["ticket_price_cents"].as_i64().map(|c| format!("¥{:.2}", c as f64 / 100.0)).unwrap_or("-".into()),
+                    d["private_note"].as_str().unwrap_or("（无）"),
+                    dims, tags
+                ));
+                // 该条目 Action 史（变更时序，含评分变更）
+                if let Ok(acts) = app.db.select_json(&format!(
+                    "SELECT at, source, changes_json FROM v_actions
+                     WHERE target='diary_entry' AND target_id='{}' ORDER BY at", eid.replace('\'', "")
+                )).await
+                    && !acts.is_empty() {
+                        let hist: Vec<String> = acts.iter().map(|a| format!(
+                            "- {} ({}) {}", 
+                            chrono::DateTime::from_timestamp(a["at"].as_i64().unwrap_or(0), 0)
+                                .map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+                                .unwrap_or_default(),
+                            a["source"].as_str().unwrap_or("?"),
+                            a["changes_json"].as_str().unwrap_or("")
+                        )).collect();
+                        ctx_parts.push(format!("这条记录的变更史（时序）:\n{}", hist.join("\n")));
+                    }
+            }
+        if let Some(mid) = session_movie_id
+            && let Ok(rows) = app.db.select_json(&format!(
+                "SELECT title_main, year, directors, genres, my_rating FROM v_movies WHERE tmdb_id={mid}"
+            )).await
+                && let Some(m) = rows.first() {
+                    ctx_parts.push(format!("所属影片: {}（{}），导演 {}，我的最终评分 {}",
+                        m["title_main"].as_str().unwrap_or("?"), m["year"].as_str().unwrap_or(""),
+                        m["directors"].as_str().unwrap_or("?"),
+                        m["my_rating"].as_i64().map(|r| r.to_string()).unwrap_or("未评".into())));
+                }
+        ctx_parts.join("\n\n")
+    } else if let Some(rid) = &current.review_id { 
+        let mut ctx_parts = Vec::new();
+        if let Ok(rows) = app.db.select_json(&format!(
+            "SELECT * FROM v_reviews_full WHERE review_id='{}'", rid.replace('\'', "")
+        )).await
+            && let Some(r) = rows.first() {
+                ctx_parts.push(format!(
+                    "讨论对象：一篇影评——\n影片: {}（{}）\n影评标题: {}\n署名评分: {}\n写作时间: {}\n正文:\n{}",
+                    r["title_zh"].as_str().or(r["title_main"].as_str()).unwrap_or("?"),
+                    r["genres"].as_str().unwrap_or(""),
+                    r["title"].as_str().unwrap_or("（无题）"),
+                    r["rating"].as_i64().map(|x| format!("{x}/100")).unwrap_or("未评".into()),
+                    chrono::DateTime::from_timestamp(r["created_at"].as_i64().unwrap_or(0), 0)
+                        .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                        .unwrap_or_default(),
+                    r["body_md"].as_str().unwrap_or("")
+                ));
+                if let Ok(acts) = app.db.select_json(&format!(
+                    "SELECT at, source, changes_json FROM v_actions
+                     WHERE target='review' AND target_id='{}' ORDER BY at", rid.replace('\'', "")
+                )).await
+                    && !acts.is_empty() {
+                        let hist: Vec<String> = acts.iter().map(|a| format!(
+                            "- {} ({}) {}",
+                            chrono::DateTime::from_timestamp(a["at"].as_i64().unwrap_or(0), 0)
+                                .map(|t| t.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+                                .unwrap_or_default(),
+                            a["source"].as_str().unwrap_or("?"),
+                            a["changes_json"].as_str().unwrap_or("")
+                        )).collect();
+                        ctx_parts.push(format!("这篇影评的变更史（时序）:\n{}", hist.join("\n")));
+                    }
+            }
+        if let Some(mid) = session_movie_id
+            && let Ok(rows) = app.db.select_json(&format!(
+                "SELECT title_main, year, directors, my_rating FROM v_movies WHERE tmdb_id={mid}"
+            )).await
+                && let Some(m) = rows.first() {
+                    ctx_parts.push(format!("所属影片: {}（{}），导演 {}，我的最终评分 {}",
+                        m["title_main"].as_str().unwrap_or("?"), m["year"].as_str().unwrap_or(""),
+                        m["directors"].as_str().unwrap_or("?"),
+                        m["my_rating"].as_i64().map(|r| r.to_string()).unwrap_or("未评".into())));
+                }
+        ctx_parts.join("\n\n")
+    } else if let Some(mid) = session_movie_id {
         let mut ctx_parts = Vec::new();
         if let Ok(rows) = app.db.select_json(&format!(
             "SELECT title_main, title_sub, year, directors, genres, runtime,
@@ -1075,6 +1198,141 @@ async fn handle_chat(
         ctx_parts.join("\n")
     } else { String::new() };
 
+    // —— P4 补充1：新 movie 系会话 → 服务端主动开场白（流式，落为第一条 assistant 消息）——
+    // 注入上下文（条目/影评/影片 + 画像）在 opening system 里复述给用户，用户可直接看到 AI 读到了什么。
+    let opening_handle = if is_fresh_session && session_movie_id.is_some() {
+        let client = app.client.read().unwrap().clone();
+        if client.is_some() {
+            let tx_o = tx.clone();
+            let sessions = app.sessions.clone();
+            let db = app.db.clone();
+            let cfg = app.config.lock().unwrap().clone();
+            let ctx_inj = context_injection.clone();
+            let token = CancellationToken::new();
+            *cancel.lock().unwrap() = Some(token.clone());
+            let mut cur = current.clone();
+            Some(tokio::spawn(async move {
+                let Some(client) = client else { return cur };
+                let tx_ev = tx_o.clone();
+                let on_event = move |ev: agent::AgentEvent| {
+                    if let agent::AgentEventKind::Token(t) = ev.kind {
+                        let _ = tx_ev.send(Message::Text(
+                            serde_json::json!({"type": "token", "data": t}).to_string().into(),
+                        ));
+                    }
+                };
+                let run = agent::opening_message(
+                    &client, &cfg, &db, &ctx_inj, token, on_event,
+                )
+                .await;
+                match run {
+                    Ok((text, (pt, ct))) => {
+                        cur.messages
+                            .push(serde_json::json!({"role": "assistant", "content": text}));
+                        if cur.title.is_empty() {
+                            cur.title = "开场讨论".to_string();
+                        }
+                        let _ = sessions.save(&cur).await;
+                        let _ = db
+                            .call(move |c| {
+                                c.execute(
+                                    "INSERT INTO usage_records (id, session_id, profile_name,
+                                   model, prompt_tokens, completion_tokens, at, kind)
+                                 VALUES (?1,'',?2,?3,?4,?5,?6,'llm')",
+                                    rusqlite::params![
+                                        uuid::Uuid::now_v7().to_string(),
+                                        "",
+                                        betterboxd_core::now(),
+                                        pt as i64,
+                                        ct as i64
+                                    ],
+                                )
+                            })
+                            .await;
+                        let _ = tx_o.send(Message::Text(
+                            serde_json::json!({"type": "done", "interrupted": false,
+                                "steps": 1, "tokens": {"prompt": pt, "completion": ct}})
+                            .to_string()
+                            .into(),
+                        ));
+                    }
+                    Err(e) => {
+                        let _ = tx_o.send(Message::Text(
+                            serde_json::json!({"type": "error", "message": e}).to_string().into(),
+                        ));
+                    }
+                }
+                cur
+            }))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(mut oh) = opening_handle {
+        // 开场白阶段：完成前不处理用户消息（防乱序），可打断
+        loop {
+            tokio::select! {
+                res = &mut oh => {
+                    if let Ok(done_session) = res { current = done_session; }
+                    *cancel.lock().unwrap() = None;
+                    break;
+                }
+                m = stream.next() => {
+                    match m {
+                        Some(Ok(Message::Text(t))) => {
+                            if let Ok(f) = serde_json::from_str::<serde_json::Value>(&t) {
+                                match f["type"].as_str() {
+                                    Some("interrupt") => {
+                                        if let Some(c) = cancel.lock().unwrap().as_ref() { c.cancel(); }
+                                    }
+                                    Some("confirm") => route_confirm(&app, &f),
+                                    Some("user") => {
+                                        let _ = tx.send(Message::Text(
+                                            serde_json::json!({"type": "error",
+                                                "message": "助手正在开场，请稍候…"})
+                                                .to_string().into()));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {
+                            // 断连：中止开场白，等任务收尾保存后结束整个连接
+                            if let Some(c) = cancel.lock().unwrap().as_ref() { c.cancel(); }
+                            let _ = oh.await; // 断连收尾：开场白已存盘，无需更新局部 current
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    'outer: loop {
+        // —— 空闲态：等待用户消息 ——
+        let Some(Ok(Message::Text(text))) = stream.next().await else {
+            break 'outer;
+        };
+        let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        if frame["type"].as_str() == Some("confirm") {
+            route_confirm(&app, &frame);
+            continue;
+        }
+        if frame["type"].as_str() != Some("user") {
+            continue;
+        }
+        let Some(user_text) = frame["text"].as_str().map(String::from) else {
+            continue;
+        };
+        let token = CancellationToken::new();
+        *cancel.lock().unwrap() = Some(token.clone());
+
+    
+
     let client = app.client.read().unwrap().clone();
     let Some(client) = client else {
             let _ = tx.send(Message::Text(
@@ -1088,6 +1346,7 @@ async fn handle_chat(
         let tmdb = app.tmdb.clone();
         let cfg_snapshot = app.config.lock().unwrap().clone();
         let mut task_session = current.clone();
+        let ctx_inj_task = context_injection.clone();
 
         // —— 运行态：Agent 在独立任务中跑，主循环只盯 interrupt/断连 ——
         let tx_task = tx.clone();
@@ -1135,7 +1394,7 @@ async fn handle_chat(
                 &ctx,
                 &mut task_session.messages,
                 &user_text,
-                &context_injection,
+                &ctx_inj_task,
                 token,
                 on_event,
             )

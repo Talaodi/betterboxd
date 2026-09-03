@@ -14,3 +14,4 @@ tokio-util = "0.7.19"
 futures-util = "0.3.34"
 rusqlite = "0.40.2"
 uuid = { version = "1.26.0", features = ["v7"] }
+chrono = "0.4.45"

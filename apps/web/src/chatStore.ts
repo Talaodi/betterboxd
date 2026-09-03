@@ -58,6 +58,10 @@ const refCount = new Map<string, number>();
 export type ChatScope = {
   /** movie 作用域：连接 /ws/chat?movie_id=N（恢复该影片最近会话） */
   movieId?: number;
+  /** 讨论某 Diary 条目（P4.1）：新建注入条目上下文的会话 */
+  entryId?: string;
+  /** 讨论某影评（P4.1）：新建注入影评上下文的会话 */
+  reviewId?: string;
   /** 精确恢复指定会话（Chats 页打开历史会话） */
   sessionId?: string;
   /** 新建会话的临时存储键（Chats 页「新建控制台会话」） */
@@ -68,6 +72,8 @@ function storeKey(scope?: ChatScope) {
   if (!scope) return "global";
   if (scope.freshKey) return `fresh:${scope.freshKey}`;
   if (scope.sessionId) return `session:${scope.sessionId}`;
+  if (scope.entryId) return `entry:${scope.entryId}`;
+  if (scope.reviewId) return `review:${scope.reviewId}`;
   if (scope.movieId) return `movie:${scope.movieId}`;
   return "global";
 }
@@ -210,9 +216,11 @@ function connect(key: string, scope?: ChatScope) {
   if (scope?.sessionId) {
     qs = `session_id=${scope.sessionId}`;
   } else {
-    // movie_id 与 fresh=1 可组合（Chats 页「影片页讨论」新建主题会话）
+    // movie_id/entry_id/review_id 与 fresh=1 可组合（新建 movie 系会话服务端主动开场白）
     const p: string[] = [];
     if (scope?.movieId) p.push(`movie_id=${scope.movieId}`);
+    if (scope?.entryId) p.push(`entry_id=${encodeURIComponent(scope.entryId)}`);
+    if (scope?.reviewId) p.push(`review_id=${encodeURIComponent(scope.reviewId)}`);
     if (scope?.freshKey) p.push("fresh=1");
     qs = p.join("&");
   }
@@ -243,6 +251,8 @@ function scopeForReconnect(key: string, s: Store): ChatScope | undefined {
   const [kind, ...rest] = key.split(":");
   const id = rest.join(":");
   if (kind === "movie") return { movieId: Number(id) };
+  if (kind === "entry") return { entryId: id };
+  if (kind === "review") return { reviewId: id };
   if (kind === "session") return { sessionId: id };
   return undefined;
 }

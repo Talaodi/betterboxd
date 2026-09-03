@@ -19,6 +19,8 @@ export function Markdown({ children }: { children: string }) {
 
 export default function ChatPanel({
   movieId,
+  entryId,
+  reviewId,
   movieTitle,
   sessionId,
   freshKey,
@@ -29,6 +31,8 @@ export default function ChatPanel({
   hint,
 }: {
   movieId?: number;
+  entryId?: string;
+  reviewId?: string;
   movieTitle?: string;
   /** 精确恢复指定会话（Chats 页打开历史会话） */
   sessionId?: string;
@@ -44,7 +48,9 @@ export default function ChatPanel({
   hint?: string;
 }) {
   const chat = useChat(
-    movieId || sessionId || freshKey ? { movieId, sessionId, freshKey } : undefined,
+    movieId || entryId || reviewId || sessionId || freshKey
+      ? { movieId, entryId, reviewId, sessionId, freshKey }
+      : undefined,
   );
   const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm } =
     chat;

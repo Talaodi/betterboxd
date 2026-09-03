@@ -140,6 +140,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "betterboxd-core",
+ "chrono",
  "futures-util",
  "rusqlite",
  "serde",

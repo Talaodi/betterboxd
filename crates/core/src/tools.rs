@@ -106,6 +106,31 @@ pub fn registry() -> ToolRegistry {
                 ),
             },
             ToolMeta {
+                name: "lookup_reviews",
+                description: "按条件检索我的影评（含正文 body_md，单条截断 2000 字符；最多 20 条）。写影评前可参考既有影评；主题/风格类主观分析请用本工具取样阅读。",
+                parameters: obj_schema(
+                    json!({
+                        "movie_id": {"type": "integer"},
+                        "title": {"type": "string", "description": "片名/影评标题关键词（模糊）"},
+                        "liked": {"type": "boolean"},
+                        "limit": {"type": "integer"},
+                        "offset": {"type": "integer"}
+                    }),
+                    &[],
+                ),
+            },
+            ToolMeta {
+                name: "search_person_movies",
+                description: "按人名搜索 TMDB 人物并返回其电影作品（出演+导演合并，按热度降序，默认 10 部）。用于推荐工作流的候选发现；结合画像与已看记录过滤后输出带理由的推荐。",
+                parameters: obj_schema(
+                    json!({
+                        "person_name": {"type": "string"},
+                        "limit": {"type": "integer"}
+                    }),
+                    &["person_name"],
+                ),
+            },
+            ToolMeta {
                 name: "get_movie_logs",
                 description: "获取某影片的全部 Log（看/评/聊混排，锚点时间倒序）。",
                 parameters: obj_schema(json!({"movie_id": {"type": "integer"}}), &["movie_id"]),
@@ -129,8 +154,11 @@ pub fn registry() -> ToolRegistry {
             },
             ToolMeta {
                 name: "lookup_lists",
-                description: "列出我的影片清单（含成员数）。",
-                parameters: obj_schema(json!({}), &[]),
+                description: "列出我的影片清单（含成员数）；传 list_id 则返回该清单成员明细（rank/片名/年份/评分/加入时间）。清单内推荐、查某清单内容都用它。",
+                parameters: obj_schema(
+                    json!({"list_id": {"type": "string", "description": "传则返回成员明细"}}),
+                    &[],
+                ),
             },
             ToolMeta {
                 name: "manage_lists",
@@ -225,10 +253,12 @@ pub async fn execute(name: &str, ctx: &ToolCtx, args: Value) -> Result<Value, St
         "search_movies" => search_movies(ctx, &args).await,
         "get_movie_details" => get_movie_details(ctx, &args).await,
         "lookup_diary" => lookup_diary(ctx, &args).await,
+        "lookup_reviews" => lookup_reviews(ctx, &args).await,
+        "search_person_movies" => search_person_movies(ctx, &args).await,
         "get_movie_logs" => get_movie_logs(ctx, &args).await,
         "run_stats" => run_stats(ctx, &args).await,
         "get_profile_snapshot" => get_profile_snapshot(ctx).await,
-        "lookup_lists" => lookup_lists(ctx).await,
+        "lookup_lists" => lookup_lists(ctx, &args).await,
         "list_saved_queries" => list_saved_queries(ctx).await,
         "manage_lists" => manage_lists(ctx, &args).await,
         "manage_saved_queries" => manage_saved_queries(ctx, &args).await,
@@ -367,6 +397,65 @@ async fn lookup_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     Ok(json!({"count": rows.len(), "rows": rows}))
 }
 
+/// 检索影评（对称 lookup_diary）：title 关键词/movie_id/liked 过滤，含 body_md（单条截断 2000 字符）。
+async fn lookup_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    use crate::db::SqlVal;
+    let mut conds = Vec::new();
+    let mut vals: Vec<SqlVal> = Vec::new();
+    if let Some(id) = get_i64(args, "movie_id") {
+        conds.push("movie_id = ?".to_string());
+        vals.push(SqlVal::Int(id));
+    }
+    if let Some(t) = get_str(args, "title") {
+        let pat = format!("%{}%", t);
+        conds.push("(title LIKE ? OR title_main LIKE ? OR title_en LIKE ?)".to_string());
+        for _ in 0..3 {
+            vals.push(SqlVal::Text(pat.clone()));
+        }
+    }
+    if let Some(l) = args.get("liked").and_then(|x| x.as_bool()) {
+        conds.push("liked = ?".to_string());
+        vals.push(SqlVal::Bool(l));
+    }
+    let where_clause = if conds.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conds.join(" AND "))
+    };
+    let limit = get_i64(args, "limit").unwrap_or(5).clamp(1, 20);
+    let offset = get_i64(args, "offset").unwrap_or(0);
+    vals.push(SqlVal::Int(limit));
+    vals.push(SqlVal::Int(offset));
+    let sql = format!(
+        "SELECT review_id, movie_id, title, title_zh, title_en, rating, liked,
+                created_at, updated_at, body_len, body_md
+         FROM v_reviews_full {where_clause} ORDER BY created_at DESC
+         LIMIT ? OFFSET ?"
+    );
+    let rows = ctx
+        .db
+        .select_json_params(sql, vals)
+        .await
+        .map_err(|e| e.to_string())?;
+    // body_md 截断（防止单条长影评挤爆工具载荷）
+    let rows: Vec<Value> = rows
+        .into_iter()
+        .map(|mut r| {
+            if let Some(b) = r["body_md"].as_str()
+                && b.len() > 2000 {
+                    let mut cut = 2000;
+                    while cut > 0 && !b.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    r["body_md"] = json!(format!("{}…[截断，body_len={}]",
+                        &b[..cut], r["body_len"].as_i64().unwrap_or(0)));
+                }
+            r
+        })
+        .collect();
+    Ok(json!({"count": rows.len(), "rows": rows}))
+}
+
 async fn get_movie_logs(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     let id = get_i64(args, "movie_id").ok_or("缺少 movie_id")?;
     let rows = ctx
@@ -458,9 +547,10 @@ pub async fn execute_stats_ro(
     }))
 }
 
-async fn get_profile_snapshot(ctx: &ToolCtx) -> Result<Value, String> {
+/// 影迷画像聚合（get_profile_snapshot 工具与 agent 画像注入共用；4 个轻量查询）。
+pub async fn profile_snapshot(db: &crate::db::DbHandle) -> Result<Value, String> {
     let q = move |sql: String| {
-        let db = ctx.db.clone();
+        let db = db.clone();
         async move { db.select_json(&sql).await }
     };
     let total = q("SELECT COUNT(*) AS n FROM v_diary_full".into())
@@ -489,8 +579,28 @@ async fn get_profile_snapshot(ctx: &ToolCtx) -> Result<Value, String> {
         "写作面": {"影评总数": reviews[0]["n"], "近30天": reviews[0]["recent30"]}
     }))
 }
+async fn get_profile_snapshot(ctx: &ToolCtx) -> Result<Value, String> {
+    profile_snapshot(&ctx.db).await
+}
 
-async fn lookup_lists(ctx: &ToolCtx) -> Result<Value, String> {
+async fn lookup_lists(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    // 传 list_id → 成员明细（rank/片名/年份/我的评分/加入时间）；不传 → 清单列表
+    if let Some(id) = get_str(args, "list_id").map(String::from) {
+        let rows = ctx
+            .db
+            .select_json_params(
+                "SELECT v.movie_id, v.rank, m.title_main, m.title_sub, m.title_zh, m.title_en,
+                        m.year, m.my_rating, m.tmdb_rating, v.added_at
+                 FROM v_lists v JOIN v_movies m ON m.tmdb_id = v.movie_id
+                 WHERE v.list_id = ?1
+                 ORDER BY (v.rank IS NULL), v.rank, v.added_at"
+                    .into(),
+                vec![crate::db::SqlVal::Text(id)],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(json!({"count": rows.len(), "items": rows}));
+    }
     let rows = ctx
         .db
         .select_json(
@@ -500,6 +610,34 @@ async fn lookup_lists(ctx: &ToolCtx) -> Result<Value, String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(json!({"lists": rows}))
+}
+
+/// 人物作品检索（TMDB person search → movie_credits，按热度降序）。
+/// 推荐工作流：画像（已注入）→ lookup_diary/run_stats 提偏好与已看 → 本工具发现候选 → 过滤已看。
+async fn search_person_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    let name = get_str(args, "person_name").ok_or("缺少 person_name")?;
+    let limit = get_i64(args, "limit").unwrap_or(10).clamp(1, 20) as usize;
+    let person = ctx
+        .tmdb
+        .person_search(name)
+        .await
+        .map_err(|e| format!("TMDB 人物搜索失败: {e}"))?;
+    let Some((pid, pname)) = person else {
+        return Ok(json!({"found": false, "query": name}));
+    };
+    let credits = ctx
+        .tmdb
+        .person_movie_credits(pid)
+        .await
+        .map_err(|e| format!("TMDB 作品获取失败: {e}"))?;
+    let total = credits.len();
+    Ok(json!({
+        "found": true,
+        "person_id": pid,
+        "person_name": pname,
+        "total_credits": total,
+        "movies": credits.into_iter().take(limit).collect::<Vec<_>>(),
+    }))
 }
 
 /// 清单维护（v0 §5.1 规格；确认门内）。List 变更不落账（非影片状态断言）。

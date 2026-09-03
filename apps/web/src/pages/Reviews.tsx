@@ -57,6 +57,7 @@ export default function Reviews() {
           <ReviewPosterCard
             key={r.review_id}
             review={{
+              review_id: r.review_id,
               title: r.title,
               body_md: r.body_md,
               rating: r.rating,
