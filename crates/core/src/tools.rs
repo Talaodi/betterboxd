@@ -886,7 +886,7 @@ fn ensure_dims(conn: &Connection, entry_id: &str, dims: &Value) -> rusqlite::Res
         return Ok(());
     };
     for (dim, names) in obj {
-        if !["地点", "同伴", "情绪", "场景"].contains(&dim.as_str()) {
+        if !["地点", "同伴", "场景"].contains(&dim.as_str()) {
             return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
                 std::io::Error::other(format!("未知维度槽位: {dim}")),
             )));

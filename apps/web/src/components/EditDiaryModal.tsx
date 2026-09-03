@@ -19,7 +19,7 @@ function entryToForm(e: EntryFull): DiaryFormData {
   const dims: Record<string, string[]> = {};
   for (const d of parseJsonArray(e.dimensions_flat)) {
     const o = d as { dimension?: string; name?: string };
-    if (o.dimension && o.name) {
+    if (o.dimension && o.name && ["地点", "场景", "同伴"].includes(o.dimension)) {
       (dims[o.dimension] ??= []).push(o.name);
     }
   }

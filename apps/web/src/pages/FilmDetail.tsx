@@ -8,6 +8,8 @@ import EditDiaryModal from "../components/EditDiaryModal";
 import EditReviewModal from "../components/EditReviewModal";
 import ChatListRow from "../components/ChatListRow";
 import { StarsDisplay, StarsEditor } from "../components/Stars";
+import { DiaryForm, emptyDiaryForm, type DiaryFormData } from "../components/DiaryForm";
+import TextWithPreview from "../components/TextWithPreview";
 
 type Detail = {
   movie: MovieRow;
@@ -416,7 +418,7 @@ function LogSection({
   );
 }
 
-// ============ 弹出卡：添加 Diary（基础 + Advanced）============
+// ============ 弹出卡：添加 Diary（复用共享 DiaryForm：标签添加流 + Markdown 预览）============
 function DiaryModal({
   movieId,
   onClose,
@@ -426,35 +428,16 @@ function DiaryModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const nowD = new Date();
-  const today = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}-${String(nowD.getDate()).padStart(2, "0")}`;
-  const [date, setDate] = useState(today);
-  const [rating, setRating] = useState<number | null>(null);
-  const [theater, setTheater] = useState(false);
-  const [price, setPrice] = useState("");
-  const [note, setNote] = useState("");
-  const [advanced, setAdvanced] = useState(false);
-  const [dims, setDims] = useState<Record<string, string>>({});
-  const [tags, setTags] = useState("");
+  const [data, setData] = useState<DiaryFormData>(emptyDiaryForm());
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [err, setErr] = useState("");
 
   const submit = async () => {
-    const dimensions: Record<string, string[]> = {};
-    for (const [dim, raw] of Object.entries(dims)) {
-      const list = raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-      if (list.length) dimensions[dim] = list;
-    }
     try {
       await sendJson("/api/diary", "POST", {
         action: "add",
         movie_id: movieId,
-        watched_date: date,
-        rating,
-        in_theater: theater,
-        ticket_price_cents: price === "" ? null : Math.round(Number(price) * 100),
-        note,
-        dimensions,
-        tags: tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+        ...data,
       });
       onSaved();
       onClose();
@@ -468,64 +451,12 @@ function DiaryModal({
       <div className="w-[460px] rounded-lg border border-[#33414f] bg-[#1b222b] p-4">
         <h2 className="mb-3 text-base font-medium">记一笔</h2>
         {err && <p className="mb-2 text-sm text-[#ff8000]">{err}</p>}
-        <div className="space-y-3">
-          <StarsEditor value={rating} onChange={setRating} />
-          <input
-            type="date"
-            className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-          <label className="flex items-center gap-4 text-sm">
-            <span className="flex items-center gap-1">
-              <input type="checkbox" checked={theater} onChange={(e) => setTheater(e.target.checked)} />
-              影院观看
-            </span>
-            {theater && (
-              <span className="flex items-center gap-1">
-                票价 ¥
-                <input
-                  type="number"
-                  className="w-20 rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                />
-              </span>
-            )}
-          </label>
-          <textarea
-            rows={3}
-            placeholder="随记（仅本地）"
-            className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <button className="text-xs text-[#40bcf4]" onClick={() => setAdvanced(!advanced)}>
-            {advanced ? "收起 Advanced ▲" : "Advanced（维度与标签）▼"}
-          </button>
-          {advanced && (
-            <div className="space-y-2 rounded border border-[#2c3440] p-2">
-              {["地点", "同伴", "情绪", "场景"].map((dim) => (
-                <label key={dim} className="block text-sm">
-                  <span className="text-[#5a6b7c]">{dim}（逗号分隔，可新建） </span>
-                  <input
-                    className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-                    value={dims[dim] ?? ""}
-                    onChange={(e) => setDims({ ...dims, [dim]: e.target.value })}
-                  />
-                </label>
-              ))}
-              <label className="block text-sm">
-                <span className="text-[#5a6b7c]">自由标签（逗号分隔） </span>
-                <input
-                  className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-                  value={tags}
-                  onChange={(e) => setTags(e.target.value)}
-                />
-              </label>
-            </div>
-          )}
-        </div>
+        <DiaryForm
+          data={data}
+          onChange={setData}
+          showAdvanced={showAdvanced}
+          onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+        />
         <div className="mt-4 flex justify-end gap-2">
           <button className="rounded px-3 py-1.5 text-sm text-[#8899aa]" onClick={onClose}>
             取消
@@ -597,12 +528,11 @@ function ReviewModal({
               onChange={(e) => setSigDate(e.target.value)}
             />
           </label>
-          <textarea
+          <TextWithPreview
+            value={body}
+            onChange={setBody}
             rows={8}
             placeholder="正文（Markdown）—— 公开长评，可对外导出"
-            className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
           />
         </div>
         <div className="mt-4 flex justify-end gap-2">

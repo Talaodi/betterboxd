@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { parseJsonArray, type DiaryRow } from "../api";
 import { StarsDisplay } from "./Stars";
+import { Markdown } from "./ChatPanel";
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
@@ -137,9 +138,9 @@ export default function DiaryEntryRow({
             </div>
           )}
           {entry.private_note ? (
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#c8d2dc]">
-              {entry.private_note}
-            </p>
+            <div className="text-sm leading-relaxed text-[#c8d2dc]">
+              <Markdown>{entry.private_note}</Markdown>
+            </div>
           ) : null}
           <button
             className="mt-1.5 text-xs text-[#40bcf4] hover:underline"

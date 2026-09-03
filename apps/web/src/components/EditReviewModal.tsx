@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getJson, sendJson } from "../api";
 import { StarsEditor } from "./Stars";
+import TextWithPreview from "./TextWithPreview";
 
 type ReviewFull = {
   review_id: string;
@@ -78,12 +79,11 @@ export default function EditReviewModal({
                 onChange={(e) => setSigDate(e.target.value)}
               />
             </label>
-            <textarea
+            <TextWithPreview
+              value={body}
+              onChange={setBody}
               rows={8}
               placeholder="正文（Markdown）—— 公开长评，可对外导出"
-              className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
             />
           </div>
         ) : (

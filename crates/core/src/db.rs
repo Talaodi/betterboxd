@@ -408,8 +408,15 @@ SET rank = (SELECT newrank FROM nulls
 WHERE rank IS NULL;
 "#;
 
+/// M007：「情绪」维度迁移清除（design-next P3，2026-09-01 裁定）——UI 收敛为
+/// 地点/场景/同伴 + 自由标签。entry_dimensions 对 dimension_values 有
+/// ON DELETE CASCADE，删除值池即清除全部情绪标注；actions 审计不回改。
+const M007: &str = r#"
+DELETE FROM dimension_values WHERE dimension = '情绪';
+"#;
+
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
-const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (6, M006)];
+const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (6, M006), (7, M007)];
 
 /// 当前最新 schema 版本（测试与启动校验用）。
 pub fn latest_version() -> i64 {

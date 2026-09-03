@@ -12,6 +12,7 @@ import {
   type DiaryFormData,
 } from "./DiaryForm";
 import { getJson, parseJsonArray } from "../api";
+import TextWithPreview from "./TextWithPreview";
 import { StarsEditor } from "./Stars";
 
 type Pending = {
@@ -38,7 +39,10 @@ function diaryFormFromEntry(e: EntryRow): DiaryFormData {
   const dims: Record<string, string[]> = {};
   for (const d of parseJsonArray(e.dimensions_flat)) {
     const o = d as { dimension: string; name: string };
-    (dims[o.dimension] ??= []).push(o.name);
+    // 情绪维度已迁移清除（P3）——旧数据残留键不进表单（提交会被 ensure_dims 拒绝）
+    if (["地点", "场景", "同伴"].includes(o.dimension ?? "")) {
+      (dims[o.dimension] ??= []).push(o.name);
+    }
   }
   return {
     watched_date: e.watched_date,
@@ -342,12 +346,11 @@ export default function ConfirmCard({
               onChange={(e) => setRevSigDate(e.target.value)}
             />
           </label>
-          <textarea
+          <TextWithPreview
+            value={revBody}
+            onChange={setRevBody}
             rows={6}
             placeholder="正文（Markdown）"
-            className="w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1.5 text-sm"
-            value={revBody}
-            onChange={(e) => setRevBody(e.target.value)}
           />
         </div>
         <div className="mt-3 flex gap-2">

@@ -28,7 +28,7 @@ export default function Chats() {
   const [chats, setChats] = useState<ChatRow[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [pendingNew, setPendingNew] = useState<PendingNew | null>(null);
-  const [tab, setTab] = useState<"all" | "topic">("all");
+  const [tab, setTab] = useState<"all" | "movies" | "topic">("all");
   const [searchParams, setSearchParams] = useSearchParams();
 
   const loadChats = useCallback(() => {
@@ -74,6 +74,7 @@ export default function Chats() {
 
   const listed = (chats ?? []).filter((c) => {
     if (tab === "all") return true;
+    if (tab === "movies") return c.scope === "movie";
     if (!anchor) return true;
     return anchor.scope === "movie"
       ? c.scope === "movie" && c.movie_id === anchor.movie_id
@@ -98,7 +99,7 @@ export default function Chats() {
       <div className="flex w-[320px] shrink-0 flex-col border-r border-[#1e2630]">
         <div className="flex items-center justify-between px-3 py-3">
           <div className="flex gap-1">
-            {([["all", "全部记录"], ["topic", "同主题记录"]] as const).map(([k, label]) => (
+            {([["all", "全部记录"], ["movies", "电影记录"], ["topic", "同主题记录"]] as const).map(([k, label]) => (
               <button
                 key={k}
                 className={

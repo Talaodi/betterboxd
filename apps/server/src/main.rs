@@ -292,6 +292,48 @@ async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Respon
     }
 }
 
+/// 标签自动补全面（P3）：值池 + 本人历史值按维度分组，自由标签高频。
+async fn taxonomy(State(app): State<App>) -> Response {
+    let dims = app
+        .db
+        .select_json(
+            "SELECT dv.dimension AS dimension, dv.name AS name,
+                    COALESCE(ed.cnt, 0) AS used
+             FROM dimension_values dv
+             LEFT JOIN (SELECT value_id, COUNT(*) AS cnt FROM entry_dimensions GROUP BY value_id) ed
+               ON ed.value_id = dv.id
+             ORDER BY dv.dimension, used DESC, dv.name",
+        )
+        .await;
+    let tags = app
+        .db
+        .select_json(
+            "SELECT t.name AS name, COUNT(et.entry_id) AS used
+             FROM tags t LEFT JOIN entry_tags et ON et.tag_id = t.id
+             GROUP BY t.id ORDER BY used DESC, t.name",
+        )
+        .await;
+    match (dims, tags) {
+        (Ok(dims), Ok(tags)) => {
+            let mut grouped: serde_json::Map<String, Value> = serde_json::Map::new();
+            for d in dims {
+                grouped
+                    .entry(d["dimension"].as_str().unwrap_or("").to_string())
+                    .or_insert_with(|| Value::Array(vec![]))
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"name": d["name"], "used": d["used"]}));
+            }
+            Json(json!({
+                "dimensions": grouped,
+                "tags": tags.iter().map(|t| json!({"name": t["name"], "used": t["used"]})).collect::<Vec<_>>(),
+            }))
+            .into_response()
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "查询失败").into_response(),
+    }
+}
+
 async fn movie_state(
     State(app): State<App>,
     AxPath(id): AxPath<i64>,
@@ -1320,6 +1362,7 @@ async fn main() {
             put(review_update).delete(review_delete),
         )
         .route("/api/tmdb/search", get(tmdb_search))
+        .route("/api/taxonomy", get(taxonomy))
         .route("/api/poster/{id}", get(poster))
         .route("/api/backdrop/{id}", get(backdrop))
         .route("/api/usage/summary", get(usage_summary))
