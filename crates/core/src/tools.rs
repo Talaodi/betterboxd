@@ -196,7 +196,7 @@ pub fn registry() -> ToolRegistry {
                         "movie_id": {"type": "integer"},
                         "in_watchlist": {"type": "boolean"}
                     }),
-                    &["movie_id"],
+                    &["movie_id", "in_watchlist"],
                 ),
             },
         ],
@@ -1257,7 +1257,6 @@ mod write_regression_tests {
     // Review 回归：watched 失修 / 跨影片误警告 / 非原子写
     use super::*;
     use crate::db::DbHandle;
-    use std::sync::{Arc, Mutex};
 
     fn setup_two_movies() -> (DbHandle, ToolCtx) {
         let conn = Connection::open_in_memory().unwrap();
