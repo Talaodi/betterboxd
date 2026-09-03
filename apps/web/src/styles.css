@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* Letterboxd 风格色板（design.md §7.11） */
 :root {
