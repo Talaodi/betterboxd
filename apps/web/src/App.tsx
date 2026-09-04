@@ -36,17 +36,21 @@ export default function App() {
   }, []);
 
   // 新存档引导：完成后进入设置页（report b80caa5：新建存档先进入设置界面引导配置 AI）
-  const [needsSetup] = useState(() => sessionStorage.getItem("bb-needs-setup") === "1");
-  if (needsSetup) {
-    sessionStorage.removeItem("bb-needs-setup");
-    return <HashRouter><Navigate to="/settings" replace /></HashRouter>;
-  }
+  const [needsSetup, setNeedsSetup] = useState(() => sessionStorage.getItem("bb-needs-setup") === "1");
+  useEffect(() => {
+    if (needsSetup) {
+      setNeedsSetup(false);
+      sessionStorage.removeItem("bb-needs-setup");
+    }
+  }, [needsSetup]);
 
   if (!picked) {
     return <ArchivePicker onPicked={() => { sessionStorage.setItem("bb-archive-picked", "1"); setPicked(true); }} />;
   }
   return (
     <HashRouter>
+      {/* 新存档首次进入：引导到设置页（Navigate 必须在 Routes 树内——与主布局同层渲染） */}
+      {needsSetup && <Navigate to="/settings" replace />}
       <div className="flex h-full">
         {/* 侧边栏 */}
         <nav className="flex w-[220px] flex-col border-r border-[#1e2630] bg-[#1b222b]">
