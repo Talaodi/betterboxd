@@ -71,7 +71,7 @@ export default function ChatPanel({
   /** 一轮流式结束（done/error）后回调（携带当前会话 id；Chats 页刷新列表/切换 open 模式） */
   onSettled?: (sessionId: string) => void;
   /** WS hello 帧后触发（会话已落盘）：Chats 页借此立即刷新列表（新会话即时出现） */
-  onHello?: () => void;
+  onHello?: (sessionId: string) => void;
   /** 删除当前会话（Chats 页标题行渲染删除按钮） */
   onDelete?: () => void;
   /** 自定义标题行文案（默认 控制台/💬片名） */
@@ -97,7 +97,7 @@ export default function ChatPanel({
   useEffect(() => {
     if (chat.sessionId && chat.sessionId !== prevSid.current) {
       prevSid.current = chat.sessionId;
-      setTimeout(() => helloRef.current?.(), 50);
+      setTimeout(() => helloRef.current?.(chat.sessionId), 50);
     }
   }, [chat.sessionId]);
   const sidRef = useRef("");
@@ -111,9 +111,23 @@ export default function ChatPanel({
   const send = useCallback(() => {
     const text = input.trim();
     if (!text || streaming || !connected || opening) return;
-    sendUser(text);
-    setInput("");
-  }, [input, streaming, connected, sendUser]);
+    // 未配置 AI：发出信息时弹窗报错（report b80caa5）
+    fetch("/api/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        const p = cfg?.profiles?.find((x: { name?: string }) => x.name === cfg.active_profile);
+        if (!p || !p.endpoint || !p.api_key || !p.model) {
+          alert("尚未配置 AI 模型：请先到「设置」配置端点和 API Key（新存档默认未配置）");
+          return;
+        }
+        sendUser(text);
+        setInput("");
+      })
+      .catch(() => {
+        sendUser(text);
+        setInput("");
+      });
+  }, [input, streaming, connected, opening, sendUser]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   useEffect(() => {

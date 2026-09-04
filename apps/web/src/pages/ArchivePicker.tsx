@@ -42,6 +42,15 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
 
   const pick = async (a: Archive) => {
     if (switching) return;
+    if ((a as Archive & { missing?: boolean }).missing) {
+      // 文件夹已被手动删除：提示 → 自动从列表去除
+      alert("存档已被删除，已从列表移除");
+      try {
+        await sendJson("/api/archives/remove", "POST", { dir: a.dir });
+        reload();
+      } catch { /* 忽略 */ }
+      return;
+    }
     if (archives && a.dir === archives.current) {
       sessionStorage.setItem("bb-archive-picked", "1");
       onPicked();
@@ -56,6 +65,16 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
       setSwitching(false);
       setTargetDir("");
       alert(`切换失败: ${(e as Error).message}`);
+    }
+  };
+  const delArchive = async (a: Archive) => {
+    if (!window.confirm(`彻底删除存档「${a.name}」？
+文件夹将一并删除（不可恢复）。`)) return;
+    try {
+      await sendJson("/api/archives/delete", "POST", { dir: a.dir });
+      reload();
+    } catch (e) {
+      alert(`删除失败: ${(e as Error).message}`);
     }
   };
 
@@ -76,6 +95,7 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
       if (!browser.name || !fs.current) return alert("需要存档名");
       const dir = `${fs.current.replace(/[\\/]$/, "")}/${browser.name}`;
       sessionStorage.setItem("bb-archive-picked", "1");
+      sessionStorage.setItem("bb-needs-setup", "1"); // 新存档 → 进入后跳设置引导 AI
       setSwitching(true);
       setTargetDir(dir);
       try {
@@ -103,22 +123,37 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
         )}
 
         <div className="space-y-3">
-          {(archives?.archives ?? []).map((a) => (
-            <div key={a.dir} className="flex items-center justify-between rounded-lg border border-[#33414f] bg-[#1b222b] px-4 py-3">
-              <div className="min-w-0">
-                <span className="font-medium text-white">{a.name}</span>
-                {archives?.active_dir === a.dir && <span className="ml-2 text-xs text-[#00e054]">● 当前</span>}
-                <div className="truncate text-xs text-[#5a6b7c]">{a.dir}</div>
+          {(archives?.archives ?? []).map((a) => {
+            const isMissing = Boolean((a as Archive & { missing?: boolean }).missing);
+            return (
+              <div key={a.dir} className={"flex items-center justify-between rounded-lg border px-4 py-3 " + (isMissing ? "border-[#5a3a3a] bg-[#1b1414]" : "border-[#33414f] bg-[#1b222b]")}>
+                <div className="min-w-0">
+                  <span className="font-medium text-white">{a.name}</span>
+                  {archives?.active_dir === a.dir && <span className="ml-2 text-xs text-[#00e054]">● 当前</span>}
+                  {isMissing && <span className="ml-2 text-xs text-[#ff8000]">⚠ 已丢失</span>}
+                  <div className="truncate text-xs text-[#5a6b7c]">{a.dir}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    className="shrink-0 rounded bg-[#00e054] px-4 py-1.5 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
+                    disabled={switching}
+                    onClick={() => pick(a)}
+                  >
+                    {isMissing ? "检查" : "进入"}
+                  </button>
+                  {archives?.active_dir !== a.dir && (
+                    <button
+                      className="shrink-0 rounded border border-[#5a3a3a] px-3 py-1 text-sm text-[#ff8000] disabled:opacity-40"
+                      disabled={switching}
+                      onClick={() => delArchive(a)}
+                    >
+                      🗑
+                    </button>
+                  )}
+                </div>
               </div>
-              <button
-                className="shrink-0 rounded bg-[#00e054] px-4 py-1.5 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
-                disabled={switching}
-                onClick={() => pick(a)}
-              >
-                进入
-              </button>
-            </div>
-          ))}
+            );
+          })}
           {archives && archives.archives.length === 0 && (
             <p className="text-sm text-[#5a6b7c]">还没有存档。</p>
           )}

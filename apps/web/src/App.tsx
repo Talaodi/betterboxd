@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HashRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import ArchivePicker from "./pages/ArchivePicker";
+import { getJson } from "./api";
 import Diary from "./pages/Diary";
 import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
@@ -23,6 +24,24 @@ const NAV = [
 
 export default function App() {
   const [picked, setPicked] = useState(() => sessionStorage.getItem("bb-archive-picked") === "1");
+  const [archiveName, setArchiveName] = useState("");
+
+  useEffect(() => {
+    getJson<{ archives: { name: string; dir: string }[]; current: string; active_dir: string | null }>("/api/archives")
+      .then((d) => {
+        const cur = d.archives.find((a) => a.dir === d.current);
+        setArchiveName(cur?.name ?? d.current);
+      })
+      .catch(() => {});
+  }, []);
+
+  // 新存档引导：完成后进入设置页（report b80caa5：新建存档先进入设置界面引导配置 AI）
+  const [needsSetup] = useState(() => sessionStorage.getItem("bb-needs-setup") === "1");
+  if (needsSetup) {
+    sessionStorage.removeItem("bb-needs-setup");
+    return <HashRouter><Navigate to="/settings" replace /></HashRouter>;
+  }
+
   if (!picked) {
     return <ArchivePicker onPicked={() => { sessionStorage.setItem("bb-archive-picked", "1"); setPicked(true); }} />;
   }
@@ -33,6 +52,9 @@ export default function App() {
         <nav className="flex w-[220px] flex-col border-r border-[#1e2630] bg-[#1b222b]">
           <div className="px-4 py-4">
             <div className="text-sm font-bold tracking-wide text-[#00e054]">Betterboxd</div>
+            <div className="mt-1 text-xs text-[#5a6b7c]" title="当前存档（切换需重启应用进入选择界面）">
+              📦 <span className="font-medium">{archiveName || "…"}</span>
+            </div>
             <NavLink to="/settings" className="text-xs text-[#5a6b7c] hover:text-[#40bcf4]">⚙ 设置</NavLink>
           </div>
           {NAV.map((n) => (

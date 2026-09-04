@@ -998,6 +998,25 @@ async fn chat_import(State(app): State<App>, Json(args): Json<serde_json::Value>
     }
 }
 
+/// 修改会话标题（report b80caa5：Session 标题可改）。
+async fn chat_title(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let Some(id) = args["id"].as_str().filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')) else {
+        return (StatusCode::BAD_REQUEST, "非法会话 ID").into_response();
+    };
+    let Some(title) = args["title"].as_str().map(String::from) else {
+        return (StatusCode::BAD_REQUEST, "缺少 title").into_response();
+    };
+    let title = title.chars().take(60).collect::<String>();
+    let Some(mut sess) = app.sessions.load(id) else {
+        return (StatusCode::NOT_FOUND, "会话不存在").into_response();
+    };
+    sess.title = title;
+    match app.sessions.save(&sess).await {
+        Ok(_) => Json(json!({"ok": true})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    }
+}
+
 /// 单个会话的历史消息（前端恢复/查看用）。
 async fn chat_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
     // 会话 id 为 uuid，仅允许安全字符
@@ -1114,24 +1133,35 @@ async fn handle_chat(
                 }
             };
             if let Some(mid) = ws_movie_id {
-                app.sessions
-                    .new_session("movie", Some(mid), ws_entry_id.clone(), ws_review_id.clone())
+                let t = movie_display_title(&app.db, Some(mid)).await;
+                let mut s = app.sessions
+                    .new_session("movie", Some(mid), ws_entry_id.clone(), ws_review_id.clone());
+                s.title = format!("新建 {} 讨论", t);
+                s
             } else if let Some(eid) = ws_entry_id {
                 let mid = derive_mid(
                     "SELECT movie_id FROM diary_entries WHERE id=?1".into(),
                     eid.clone(),
                 )
                 .await;
-                app.sessions.new_session("movie", mid, Some(eid), None)
+                let t = movie_display_title(&app.db, mid).await;
+                let mut s = app.sessions.new_session("movie", mid, Some(eid), None);
+                s.title = format!("新建 {} 讨论", t);
+                s
             } else if let Some(rid) = ws_review_id {
                 let mid = derive_mid(
                     "SELECT movie_id FROM reviews WHERE id=?1".into(),
                     rid.clone(),
                 )
                 .await;
-                app.sessions.new_session("movie", mid, None, Some(rid))
+                let t = movie_display_title(&app.db, mid).await;
+                let mut s = app.sessions.new_session("movie", mid, None, Some(rid));
+                s.title = format!("新建 {} 讨论", t);
+                s
             } else {
-                app.sessions.new_session("global", None, None, None)
+                let mut s = app.sessions.new_session("global", None, None, None);
+                s.title = "新建控制台会话".into();
+                s
             }
         }
     };
@@ -1307,6 +1337,7 @@ async fn handle_chat(
             ));
             None
         } else if client.is_some() {
+            // 已配置 AI：正常开场
             let tx_o = tx.clone();
             let sessions = app.sessions.clone();
             let db = app.db.clone();
@@ -1336,7 +1367,7 @@ async fn handle_chat(
                         cur.messages
                             .push(serde_json::json!({"role": "assistant", "content": text}));
                         if cur.title.is_empty() {
-                            cur.title = "开场讨论".to_string();
+                            cur.title = "新建控制台会话".to_string();
                         }
                         // 开场白同样记账（含成本；profile_usage 累加）
                         // （cost attach 在 log_llm_usage 返回后，与 run 一致）
@@ -1378,6 +1409,14 @@ async fn handle_chat(
                 cur
             }))
         } else {
+            // 未配置 AI：通知前端（opening 结束态，避免界面卡在「开场中」）
+            let _ = tx.send(Message::Text(
+                serde_json::json!({"type": "done", "interrupted": false,
+                    "steps": 0, "tokens": {"prompt": 0, "completion": 0},
+                    "aborted": Some("尚未配置 AI 模型：请先到「设置」配置".to_string())})
+                .to_string()
+                .into(),
+            ));
             None
         }
     } else {
@@ -1773,7 +1812,19 @@ async fn archives_list(State(app): State<App>) -> Response {
         let _ = write_archives(&v);
     }
     let active = v["active_dir"].as_str().map(String::from).or(Some(app.data_dir.to_string_lossy().to_string()));
-    Json(serde_json::json!({"active_dir": active, "archives": v["archives"], "current": cur}))
+    // missing 标记：文件夹已不存在（用户手动删除）→ 选择屏点入时提示并自动去除
+    let list = v["archives"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut a| {
+            let d = a["dir"].as_str().unwrap_or("");
+            a["missing"] = serde_json::json!(!d.is_empty() && !std::path::Path::new(d).exists());
+            a
+        })
+        .collect::<Vec<_>>();
+    Json(serde_json::json!({"active_dir": active, "archives": list, "current": cur}))
         .into_response()
 }
 
@@ -1878,6 +1929,32 @@ fn restart_into(dir: std::path::PathBuf, name: String) -> Response {
         std::process::exit(0);
     });
     resp
+}
+
+/// 彻底删除存档：confirm 后物理删除目录 + 移出列表。拒绝删除当前活动目录。
+async fn archive_delete(State(_app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let dir = args["dir"].as_str().unwrap_or("").to_string();
+    if dir.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "需要 dir").into_response();
+    }
+    let mut v = read_archives();
+    if v["active_dir"].as_str() == Some(dir.as_str()) {
+        return (axum::http::StatusCode::CONFLICT, "不能删除当前正在使用的存档").into_response();
+    }
+    let list = v["archives"].as_array().cloned().unwrap_or_default();
+    let list: Vec<serde_json::Value> = list
+        .into_iter()
+        .filter(|a| a["dir"].as_str() != Some(dir.as_str()))
+        .collect();
+    v["archives"] = serde_json::Value::Array(list);
+    if let Err(e) = write_archives(&v) {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("列表写入失败: {e}")).into_response();
+    }
+    let p = std::path::PathBuf::from(&dir);
+    match std::fs::remove_dir_all(&p) {
+        Ok(_) => Json(serde_json::json!({"ok": true, "deleted": true})).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("目录删除失败: {e}（已从列表移除）")).into_response(),
+    }
 }
 
 /// 从列表移除（不删文件）；若为当前存档仅移出。
@@ -2030,6 +2107,18 @@ async fn fs_list(State(_app): State<App>, Query(q): Query<std::collections::Hash
 }
 
 
+/// 影片显示名（标题用；无数据回退 "影片"）。
+async fn movie_display_title(db: &DbHandle, mid: Option<i64>) -> String {
+    let Some(mid) = mid else { return "影片".into() };
+    db.select_json(&format!(
+        "SELECT COALESCE(title_main, title_zh, '影片') AS t FROM v_movies WHERE tmdb_id={mid}"
+    ))
+    .await
+    .ok()
+    .and_then(|r| r.first().and_then(|x| x["t"].as_str().map(String::from)))
+    .unwrap_or_else(|| "影片".into())
+}
+
 fn data_dir_path() -> std::path::PathBuf {
     // 统一各路数据目录解析：config_save/chat_delete 等曾用 BB_DATA-only 版本，
     // 存档切换（--data-dir 重启）后写错目录——全部收敛到 resolve_data_dir()。
@@ -2154,6 +2243,8 @@ async fn main() {
         .route("/api/archives/create", post(archive_create))
         .route("/api/archives/register", post(archive_register))
         .route("/api/archives/remove", post(archive_remove))
+        .route("/api/archives/delete", post(archive_delete))
+        .route("/api/chats/title", put(chat_title))
         .route("/api/tools/execute", post(tools_execute))
         .route("/api/stats/run", post(stats_run))
         .route("/api/saved-queries", get(saved_queries_list))

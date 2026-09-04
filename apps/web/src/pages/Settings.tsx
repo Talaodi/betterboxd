@@ -25,27 +25,20 @@ type UsageRow = {
   profile_name: string; total: number; cache_cost: number;
   cache_currency: string; budget: number | null; currency: string; pricing: Pricing;
 };
-type Archive = { name: string; dir: string };
 
 export default function Settings() {
   const [config, setConfig] = useState<Config | null>(null);
   const [usage, setUsage] = useState<UsageRow[]>([]);
-  const [archives, setArchives] = useState<{ active_dir: string | null; archives: Archive[]; current: string } | null>(null);
   const [editing, setEditing] = useState<number | null>(null); // 编辑中的 profile 下标
   const [draft, setDraft] = useState<Profile | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [parentDir, setParentDir] = useState("");
-  const [archName, setArchName] = useState("");
-  const [loadDir, setLoadDir] = useState("");
-  const [busy, setBusy] = useState(false);
 
   const reload = () => {
     getJson<Config>("/api/config").then(setConfig).catch((e) => alert(e.message));
     getJson<{ profiles: UsageRow[] }>("/api/usage/profiles")
       .then((d) => setUsage(d.profiles))
       .catch(() => {});
-    getJson<typeof archives>("/api/archives").then(setArchives).catch(() => {});
   };
   useEffect(reload, []);
 
@@ -101,16 +94,6 @@ export default function Settings() {
   const delProfile = (i: number) => {
     if (!window.confirm(`删除配置「${config.profiles[i].name}」？`)) return;
     save({ ...config, profiles: config.profiles.filter((_, j) => j !== i) });
-  };
-
-  const arch = async (path: string, body: unknown) => {
-    setBusy(true);
-    try {
-      await sendJson(path, "POST", body);
-    } catch (e) {
-      alert(`操作失败: ${(e as Error).message}`);
-    }
-    setBusy(false);
   };
 
   const maskKey = (k: string) => (k.length <= 7 ? "****" : `${k.slice(0, 4)}****${k.slice(-3)}`);
@@ -245,81 +228,6 @@ export default function Settings() {
           </div>
         </div>
       )}
-
-      {/* 存档管理 */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-sm font-medium text-[#8899aa]">存档</h2>
-        <div className="rounded-lg border border-[#33414f] bg-[#1b222b] p-3 text-sm">
-          <p className="mb-2 text-xs text-[#5a6b7c]">
-            当前数据目录：<code className="font-mono">{archives?.current}</code>
-          </p>
-          {archives && archives.archives.length > 0 && (
-            <div className="mb-3 space-y-2">
-              {archives.archives.map((a) => (
-                <div key={a.dir} className="flex items-center justify-between gap-2 rounded border border-[#2c3440] px-3 py-2">
-                  <div className="min-w-0">
-                    <span className="font-medium text-white">{a.name}</span>
-                    <span className="ml-2 text-xs text-[#5a6b7c]">{a.dir}</span>
-                    {archives.active_dir === a.dir && <span className="ml-2 text-xs text-[#00e054]">● 当前</span>}
-                  </div>
-                  <div className="flex shrink-0 gap-2 text-xs">
-                    {archives.active_dir !== a.dir && (
-                      <button className="text-[#40bcf4] hover:underline" disabled={busy}
-                        onClick={() => arch("/api/archives/register", { dir: a.dir, name: a.name })}>
-                        切换
-                      </button>
-                    )}
-                    <button className="text-[#ff8000] hover:underline" disabled={busy}
-                      onClick={() => arch("/api/archives/remove", { dir: a.dir })}>
-                      移除列表（不删文件）
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
-            <input placeholder="父文件夹（如 /home/user/存档库）" className="rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-              value={parentDir} onChange={(e) => setParentDir(e.target.value)} />
-            <input placeholder="存档名" className="rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-              value={archName} onChange={(e) => setArchName(e.target.value)} />
-            <button className="rounded bg-[#00e054] px-3 py-1 text-xs font-medium text-[#0c1a10] disabled:opacity-40" disabled={busy || !parentDir || !archName}
-              onClick={() => arch("/api/archives/create", { name: archName, parent_dir: parentDir })}>
-              新建存档
-            </button>
-          </div>
-          <div className="mt-2 flex gap-2">
-            <input placeholder="载入已有存档目录（含 .betterboxd 结构）" className="flex-1 rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-              value={loadDir} onChange={(e) => setLoadDir(e.target.value)} />
-            <button className="rounded border border-[#33414f] px-3 py-1 text-xs text-[#40bcf4] disabled:opacity-40" disabled={busy || !loadDir}
-              onClick={() => arch("/api/archives/register", { dir: loadDir })}>
-              载入
-            </button>
-          </div>
-          <p className="mt-2 text-[10px] text-[#5a6b7c]">
-            新建=在所选父文件夹下创建「存档名」目录（含 .betterboxd 结构）；载入=注册已有目录（格式不做深校验）；切换后会重启 server（几秒）。存档目录可放任意本地盘（Windows/Mac/Linux 均可）。
-          </p>
-        </div>
-      </section>
-
-      {/* 预算（全局月度/累计） */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-sm font-medium text-[#8899aa]">全局预算</h2>
-        <div className="rounded-lg border border-[#33414f] bg-[#1b222b] p-3 text-sm">
-          <div className="grid grid-cols-2 gap-2">
-            <label>月度预算
-              <input type="number" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-                value={config.billing.budget_monthly ?? ""}
-                onChange={(e) => setConfig({ ...config, billing: { ...config.billing, budget_monthly: e.target.value === "" ? null : Number(e.target.value) } })} />
-            </label>
-            <label>累计预算
-              <input type="number" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
-                value={config.billing.budget_total ?? ""}
-                onChange={(e) => setConfig({ ...config, billing: { ...config.billing, budget_total: e.target.value === "" ? null : Number(e.target.value) } })} />
-            </label>
-          </div>
-        </div>
-      </section>
 
       <button
         className="rounded bg-[#00e054] px-6 py-2 text-sm font-medium text-[#0c1a10] disabled:opacity-40"

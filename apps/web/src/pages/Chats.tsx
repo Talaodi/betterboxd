@@ -32,6 +32,8 @@ export default function Chats() {
   const [chats, setChats] = useState<ChatRow[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [pendingNew, setPendingNew] = useState<PendingNew | null>(null);
+  /** fresh 新会话 hello 后的真实 id（用于删除/改名；面板不切换） */
+  const [pendingNewSid, setPendingNewSid] = useState("");
   const [tab, setTab] = useState<"all" | "movies" | "topic">("all");
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -169,14 +171,27 @@ export default function Chats() {
   };
 
   const delOpen = async () => {
-    if (!open) return;
-    if (!window.confirm(`删除会话「${open.title || "（无标题）"}」？此操作不可撤销。`)) return;
+    if (!open && !pendingNewSid) return;
+    const sid = open?.id ?? pendingNewSid;
+    if (!window.confirm(`删除会话「${open?.title || "（新会话）"}」？此操作不可撤销。`)) return;
     try {
-      await sendJson(`/api/chats/${open.id}`, "DELETE");
-      setOpenId(null);
+      await sendJson(`/api/chats/${sid}`, "DELETE");
+      if (open) setOpenId(null);
       loadChats();
     } catch (e) {
       alert(`删除失败: ${(e as Error).message}`);
+    }
+  };
+  const renameOpen = async (title: string) => {
+    if (!open && !pendingNewSid) return;
+    const sid = open?.id ?? pendingNewSid;
+    const t = window.prompt("修改会话标题", title ?? "");
+    if (!t || t.trim() === title) return;
+    try {
+      await sendJson("/api/chats/title", "PUT", { id: sid, title: t.trim() });
+      loadChats();
+    } catch (e) {
+      alert(`改名失败: ${(e as Error).message}`);
     }
   };
 
@@ -216,10 +231,19 @@ export default function Chats() {
                 ⬇ 导出
               </button>
             )}
+            {(open || pendingNewSid) && (
+              <button
+                className="rounded px-2 py-1 text-xs text-[#8899aa] hover:text-white"
+                title="修改会话标题"
+                onClick={() => renameOpen(open?.title ?? "（新会话）")}
+              >
+                ✎
+              </button>
+            )}
             <button
               className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
               title="新建控制台会话"
-              onClick={() => { setPendingNew({ key: Date.now() }); setOpenId(null); setTab("topic"); }}
+              onClick={() => { setPendingNew({ key: Date.now() }); setOpenId(null); setPendingNewSid(""); setTab("topic"); }}
             >
               + 新建
             </button>
@@ -240,7 +264,7 @@ export default function Chats() {
               subtitle={`${c.scope === "movie" ? (c.movie_title ?? "影片") : "控制台"} · ${new Date(c.last_message_at * 1000).toLocaleDateString("zh-CN")}`}
               tmdbId={c.tmdb_id}
               movieTitle={c.movie_title}
-              selected={openId === c.id && !pendingNew}
+              selected={openId === c.id}
               onClick={() => { setOpenId(c.id); setPendingNew(null); }}
             />
           ))}
@@ -259,23 +283,25 @@ export default function Chats() {
               reviewId={pendingNew.reviewId}
               header={
                 pendingNew.subject
-                  ? `💬 ${pendingNew.subject} · 新会话`
+                  ? `💬 ${pendingNew.subject}`
                   : pendingNew.movieId
-                    ? `💬 ${pendingNew.movieTitle ?? "影片"} · 新会话`
-                    : "控制台 · 新会话"
+                    ? `💬 ${pendingNew.movieTitle ?? "影片"}`
+                    : "💬 新建控制台会话"
               }
               hint={
                 pendingNew.movieTitle
                   ? `和影迷助手聊聊《${pendingNew.movieTitle}》——它了解这部片和你的观影记录。`
                   : undefined
               }
-              onHello={loadChats}
+              onDelete={pendingNewSid ? delOpen : undefined}
+              onHello={(sid) => {
+                // 会话已落盘（预保存）→ 立即可高亮/可删除；面板保持 freshKey 常驻（不切换避免重挂刷新）
+                setOpenId(sid);
+                setPendingNewSid(sid);
+                loadChats();
+              }}
               onSettled={(sid) => {
-                // 首轮流结束：会话已落盘 → 切回 open 模式（可删除/高亮），刷新列表
-                if (sid) {
-                  setPendingNew(null);
-                  setOpenId(sid);
-                }
+                setOpenId(sid);
                 loadChats();
               }}
             />
