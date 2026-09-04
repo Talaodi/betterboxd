@@ -105,11 +105,11 @@ export default function Settings() {
 
   return (
     <div className="mx-auto max-w-[900px] p-4">
-      <h1 className="mb-6 text-xl font-bold">设置</h1>
+      <h1 className="mb-6 text-xl font-bold">Settings</h1>
 
       {/* 模型配置（卡片式） */}
       <section className="mb-6">
-        <h2 className="mb-3 text-sm font-medium text-[#8899aa]">模型配置</h2>
+        <h2 className="mb-3 text-sm font-medium text-[#8899aa]">Model Profiles</h2>
         <div className="space-y-3">
           {config.profiles.map((p, i) => {
             const u = usg(p.name);
@@ -127,21 +127,17 @@ export default function Settings() {
                     >
                       {config.active_profile === p.name ? "✓ 当前" : "切换"}
                     </button>
-                    <button className="text-xs text-[#40bcf4] hover:underline" onClick={() => openEdit(i)}>编辑</button>
-                    <button className="text-xs text-[#ff8000] hover:underline" onClick={() => delProfile(i)}>删除</button>
+                    <button className="text-xs text-[#40bcf4] hover:underline" onClick={() => openEdit(i)}>Edit</button>
+                    <button className="text-xs text-[#ff8000] hover:underline" onClick={() => delProfile(i)}>Delete</button>
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-[#8899aa]">
-                  <span>API Key：<span className="font-mono">{maskKey(p.api_key)}</span></span>
-                  <span>Endpoint：{p.endpoint || "—"}</span>
+                  <span>API Key: <span className="font-mono">{maskKey(p.api_key)}</span></span>
+                  <span>Endpoint: {p.endpoint || "—"}</span>
+                  <span>Total: {u ? `${fmt(u.total)} ${u.currency}` : "—"}</span>
                   <span>
-                    总用量：{u ? `${fmt(u.total)} ${u.currency}` : "—"}
-                    <span className="text-[#5a6b7c]">（历史累计）</span>
-                  </span>
-                  <span>
-                    缓存用量：{u ? `${fmt(u.cache_cost)} ${u.cache_currency}` : "—"}
-                    <span className="text-[#5a6b7c]">（预算判断；{p.budget ? `预算 ${fmt(p.budget)}` : "未设预算"}）
-                    </span>
+                    Cache: {u ? `${fmt(u.cache_cost)} ${u.cache_currency}` : "—"}
+                    {p.budget != null && <span className="text-[#5a6b7c]"> · Budget {fmt(p.budget)}</span>}
                     <button className="ml-1 text-[#40bcf4] hover:underline" onClick={() => resetUsage(p.name)}>Reset</button>
                   </span>
                 </div>
@@ -149,7 +145,7 @@ export default function Settings() {
             );
           })}
         </div>
-        <button className="mt-2 text-xs text-[#40bcf4]" onClick={addProfile}>+ 添加配置</button>
+        <button className="mt-2 text-xs text-[#40bcf4]" onClick={addProfile}>+ Add Profile</button>
       </section>
 
       {/* TMDB API Key：与 AI 配置分离，独立一行 */}
@@ -165,7 +161,7 @@ export default function Settings() {
                 onChange={(e) => setConfig({ ...config, tmdb: { ...config.tmdb, key: e.target.value } })}
               />
               <button className="shrink-0 rounded bg-[#00e054] px-3 py-1 text-xs font-medium text-[#0c1a10]" onClick={() => save(config)}>
-                保存
+                Save
               </button>
             </div>
           </label>
@@ -176,9 +172,9 @@ export default function Settings() {
       {editing && draft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditing(null)}>
           <div className="max-h-[85vh] w-full max-w-[560px] overflow-y-auto rounded-xl border border-[#33414f] bg-[#11151a] p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 font-medium">编辑配置</h3>
+            <h3 className="mb-3 font-medium">Edit Configuration</h3>
             <div className="grid grid-cols-2 gap-2 text-sm">
-              <label className="text-xs text-[#8899aa]">名称
+              <label className="text-xs text-[#8899aa]">Name
                 <input className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.name}
                   onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
               </label>
@@ -202,22 +198,21 @@ export default function Settings() {
                 <input type="number" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.max_output_tokens ?? ""}
                   onChange={(e) => setDraft({ ...draft, max_output_tokens: e.target.value === "" ? null : Number(e.target.value) })} />
               </label>
-              <label className="text-xs text-[#8899aa]">思考模式
+              <label className="text-xs text-[#8899aa]">Thinking Mode
                 <select className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.thinking_mode}
                   onChange={(e) => setDraft({ ...draft, thinking_mode: e.target.value })}>
-                  <option value="off">关闭</option>
-                  <option value="on">开启</option>
+                  <option value="off">Off</option>
+                  <option value="on">On</option>
                 </select>
               </label>
-              <label className="text-xs text-[#8899aa]">思考强度</label>
-              <label className="text-xs text-[#8899aa]">思考强度 (直接传给模型的档位)
+              <label className="text-xs text-[#8899aa]">Thinking Strength
                 <select className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm"
                   value={draft.thinking_strength ?? "high"}
                   disabled={draft.thinking_mode !== "on"}
                   onChange={(e) => setDraft({ ...draft, thinking_strength: e.target.value })}>
-                  <option value="low">低 (low)</option>
-                  <option value="high">高 (high)</option>
-                  <option value="max">最高 (max)</option>
+                  <option value="low">Low</option>
+                  <option value="high">High</option>
+                  <option value="max">Max</option>
                 </select>
               </label>
               <label className="text-xs text-[#8899aa]">温度 Temperature
@@ -231,42 +226,43 @@ export default function Settings() {
             </div>
 
             {/* 价格与预算 */}
-            <h4 className="mt-4 mb-2 text-xs font-medium text-[#8899aa]">计费价格（每 1M token）与预算</h4>
+            <h4 className="mt-4 mb-2 text-xs font-medium text-[#8899aa]">Pricing (per 1M tokens) & Budget</h4>
             <div className="grid grid-cols-2 gap-2 text-xs">
-              <label className="text-[#8899aa]">输入（缓存命中）
+              <label className="text-[#8899aa]">Input (cached)
                 <input type="number" step="0.0001" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.pricing.input_cached}
                   onChange={(e) => setDraft({ ...draft, pricing: { ...draft.pricing, input_cached: Number(e.target.value) } })} />
               </label>
-              <label className="text-[#8899aa]">输入（未命中）
+              <label className="text-[#8899aa]">Input (uncached)
                 <input type="number" step="0.0001" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.pricing.input_uncached}
                   onChange={(e) => setDraft({ ...draft, pricing: { ...draft.pricing, input_uncached: Number(e.target.value) } })} />
               </label>
-              <label className="text-[#8899aa]">输出（缓存命中，极少见，默认 0）
+              <label className="text-[#8899aa]">Output (cached, rare, default 0)
                 <input type="number" step="0.0001" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.pricing.output_cached}
                   onChange={(e) => setDraft({ ...draft, pricing: { ...draft.pricing, output_cached: Number(e.target.value) } })} />
               </label>
-              <label className="text-[#8899aa]">输出（未命中）
+              <label className="text-[#8899aa]">Output (uncached)
                 <input type="number" step="0.0001" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.pricing.output_uncached}
                   onChange={(e) => setDraft({ ...draft, pricing: { ...draft.pricing, output_uncached: Number(e.target.value) } })} />
               </label>
-              <label className="text-[#8899aa]">货币
+              <label className="text-[#8899aa]">Currency
                 <select className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.currency}
                   onChange={(e) => setDraft({ ...draft, currency: e.target.value })}>
                   <option>CNY</option><option>USD</option>
                 </select>
               </label>
-              <label className="text-[#8899aa]">用量上限（钱；按缓存用量判断，超即停）
+              <label className="text-[#8899aa]">Budget (by cache; stops when reached)
                 <input type="number" step="0.01" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.budget ?? ""}
                   onChange={(e) => setDraft({ ...draft, budget: e.target.value === "" ? null : Number(e.target.value) })} placeholder="不填=不限" />
               </label>
             </div>
             <p className="mt-2 text-[10px] text-[#5a6b7c]">
-              提示：缓存命中输出极少见（多数厂商不提供），保留字段默认 0；价格与预算直接在存档目录 config.toml 编辑同样生效。
+              Note: cached output is rare (most providers do not expose it), keep 0. Pricing also works when editing
+              config.toml directly.
             </p>
 
             <div className="mt-4 flex justify-end gap-2">
-              <button className="rounded border border-[#33414f] px-4 py-1.5 text-sm text-[#5a6b7c]" onClick={() => setEditing(null)}>取消</button>
-              <button className="rounded bg-[#00e054] px-4 py-1.5 text-sm font-medium text-[#0c1a10]" onClick={saveDraft} disabled={saving}>保存</button>
+              <button className="rounded border border-[#33414f] px-4 py-1.5 text-sm text-[#5a6b7c]" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="rounded bg-[#00e054] px-4 py-1.5 text-sm font-medium text-[#0c1a10]" onClick={saveDraft} disabled={saving}>Save</button>
             </div>
           </div>
         </div>
