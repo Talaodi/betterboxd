@@ -1925,7 +1925,9 @@ async fn usage_reset(State(app): State<App>, Json(args): Json<serde_json::Value>
 
 
 fn data_dir_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("BB_DATA").unwrap_or_else(|_| "data".into()))
+    // 统一各路数据目录解析：config_save/chat_delete 等曾用 BB_DATA-only 版本，
+    // 存档切换（--data-dir 重启）后写错目录——全部收敛到 resolve_data_dir()。
+    resolve_data_dir()
 }
 
 /// 存档列表（用户级）：~/.config/betterboxd/archives.json
