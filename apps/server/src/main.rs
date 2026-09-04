@@ -927,7 +927,14 @@ fn llm_to_ui_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> 
                     }
                 }
                 if let Some(t) = m["content"].as_str().filter(|t| !t.is_empty()) {
-                    ui.push(json!({"role": "assistant", "text": t}));
+                    let mut v = json!({"role": "assistant", "text": t});
+                    if let Some(u) = m.get("usage") {
+                        v["usage"] = u.clone();
+                    }
+                    if let Some(c) = m.get("cost") {
+                        v["cost"] = c.clone();
+                    }
+                    ui.push(v);
                 }
             }
             "tool" => {
@@ -1092,6 +1099,8 @@ async fn handle_chat(
     };
     // 新建：entry/review 入口的 movie_id 从行派生（WS 不要求同时传 movie_id）
     let is_fresh_session = resumed.is_none();
+    // 开场白触发判定（hello 帧带标记；budget 前置检查在此完成一次）
+    let opening_wanted = is_fresh_session;
     let mut current = match resumed {
         Some(s) => s,
         None => {
@@ -1128,8 +1137,14 @@ async fn handle_chat(
     };
     // 恢复的会话自带 movie 归属——上下文注入跟随会话而非查询参数
     let session_movie_id = current.movie_id;
-    let hello = serde_json::json!({"type": "hello", "session_id": current.id});
+    let opening_triggered = opening_wanted;
+    let hello = serde_json::json!({"type": "hello", "session_id": current.id,
+        "opening": opening_triggered});
     let _ = tx.send(Message::Text(hello.to_string().into()));
+    // 新会话立即落盘：Charts 列表无需等首轮结束即显示（report 3703c41 2 条）
+    if is_fresh_session {
+        let _ = app.sessions.save(&current).await;
+    }
 
     let cancel: Arc<Mutex<Option<CancellationToken>>> = Arc::new(Mutex::new(None));
 
@@ -1259,7 +1274,7 @@ async fn handle_chat(
 
     // —— P4 补充1：新 movie 系会话 → 服务端主动开场白（流式，落为第一条 assistant 消息）——
     // 注入上下文（条目/影评/影片 + 画像）在 opening system 里复述给用户，用户可直接看到 AI 读到了什么。
-    let opening_handle = if is_fresh_session {
+    let opening_handle = if opening_wanted {
         let client = app.client.read().unwrap().clone();
         // 开场白也为 LLM 调用：预算（缓存用量）拦截前置，超限直接提示（不跑生成）
         let budget_ok = {
@@ -1323,14 +1338,20 @@ async fn handle_chat(
                         if cur.title.is_empty() {
                             cur.title = "开场讨论".to_string();
                         }
-                        let _ = sessions.save(&cur).await;
                         // 开场白同样记账（含成本；profile_usage 累加）
+                        // （cost attach 在 log_llm_usage 返回后，与 run 一致）
                         let pricing = cfg.active().map(|p| (p.pricing.clone(), p.currency.clone()));
                         let (pz, cz) = pricing.unwrap_or_default();
                         let (cost, cur_) = log_llm_usage(
                             &db, &cur.id, &pname, &pmodel, pt, ct, hit, miss, &pz, &cz,
                         )
                         .await;
+                        attach_usage(
+                            &mut cur.messages,
+                            serde_json::json!({"prompt": pt, "completion": ct, "hit": hit, "miss": miss}),
+                            serde_json::json!({"value": cost, "currency": cur_}),
+                        );
+                        let _ = sessions.save(&cur).await;
                         let _ = tx_o.send(Message::Text(
                             serde_json::json!({"type": "done", "interrupted": false,
                                 "steps": 1, "tokens": {"prompt": pt, "completion": ct,
@@ -1515,6 +1536,18 @@ async fn handle_chat(
                         &pricing.1,
                     )
                     .await;
+                    // usage/cost 持久化到最后一条 assistant 消息（历史恢复也有显示）
+                    attach_usage(
+                        &mut task_session.messages,
+                        serde_json::json!({
+                            "prompt": summary.usage_tokens.0,
+                            "completion": summary.usage_tokens.1,
+                            "hit": summary.usage_cache.0,
+                            "miss": summary.usage_cache.1,
+                        }),
+                        serde_json::json!({"value": cost, "currency": cur}),
+                    );
+                    let _ = sessions.save(&task_session).await;
                     let tx_done = tx_task.clone();
                     let done = serde_json::json!({
                         "type": "done",
@@ -1726,9 +1759,21 @@ fn write_archives(v: &serde_json::Value) -> Result<(), String> {
 }
 
 async fn archives_list(State(app): State<App>) -> Response {
-    let v = read_archives();
+    let mut v = read_archives();
+    // 保证当前目录必在列表（新环境/被清理后也能「进入当前」；name=目录名）
+    let cur = app.data_dir.to_string_lossy().to_string();
+    let mut list = v["archives"].as_array().cloned().unwrap_or_default();
+    if !list.iter().any(|a| a["dir"].as_str() == Some(cur.as_str())) {
+        let name = std::path::Path::new(&cur)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "当前存档".to_string());
+        list.push(serde_json::json!({"name": name, "dir": cur}));
+        v["archives"] = serde_json::Value::Array(list);
+        let _ = write_archives(&v);
+    }
     let active = v["active_dir"].as_str().map(String::from).or(Some(app.data_dir.to_string_lossy().to_string()));
-    Json(serde_json::json!({"active_dir": active, "archives": v["archives"], "current": app.data_dir.to_string_lossy().to_string()}))
+    Json(serde_json::json!({"active_dir": active, "archives": v["archives"], "current": cur}))
         .into_response()
 }
 
@@ -1924,6 +1969,67 @@ async fn usage_reset(State(app): State<App>, Json(args): Json<serde_json::Value>
 }
 
 
+/// 把本轮 usage/cost 附加到会话最后一条 assistant 消息（持久化，恢复会话也有用量显示）。
+fn attach_usage(messages: &mut [serde_json::Value], usage: serde_json::Value, cost: serde_json::Value) {
+    for m in messages.iter_mut().rev() {
+        if m["role"].as_str() == Some("assistant") {
+            if m["content"].as_str().map(|s| !s.is_empty()).unwrap_or(false) {
+                m["usage"] = usage;
+                m["cost"] = cost;
+            }
+            break;
+        }
+    }
+}
+
+// ============ 文件系统目录浏览（存档选择窗口用；localhost 单机）============
+/// GET /api/fs/list?path=：列目录（仅目录），返回 parent/home/错误信息。
+/// 起始（path 空/省略）：home 目录跨平台解析。
+async fn fs_list(State(_app): State<App>, Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let home = dirs_home();
+    let cur_raw = q.get("path").map(String::as_str).unwrap_or("");
+    let cur = if cur_raw.is_empty() {
+        home.clone()
+    } else {
+        std::path::PathBuf::from(cur_raw)
+    };
+    let read = std::fs::read_dir(&cur);
+    match read {
+        Ok(rd) => {
+            let mut dirs: Vec<serde_json::Value> = Vec::new();
+            for en in rd.flatten() {
+                if let Ok(meta) = en.metadata() {
+                    if meta.is_dir() {
+                        dirs.push(serde_json::json!({
+                            "name": en.file_name().to_string_lossy().to_string(),
+                            "path": en.path().to_string_lossy().to_string(),
+                        }));
+                    }
+                }
+            }
+            dirs.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+            let parent = cur.parent().map(|p| p.to_string_lossy().to_string());
+            Json(serde_json::json!({
+                "current": cur.to_string_lossy().to_string(),
+                "parent": parent,
+                "home": home.to_string_lossy().to_string(),
+                "dirs": dirs,
+            })).into_response()
+        }
+        Err(_) => {
+            let parent = cur.parent().map(|p| p.to_string_lossy().to_string());
+            Json(serde_json::json!({
+                "current": cur.to_string_lossy().to_string(),
+                "parent": parent,
+                "home": home.to_string_lossy().to_string(),
+                "dirs": [],
+                "error": "无法读取该目录",
+            })).into_response()
+        }
+    }
+}
+
+
 fn data_dir_path() -> std::path::PathBuf {
     // 统一各路数据目录解析：config_save/chat_delete 等曾用 BB_DATA-only 版本，
     // 存档切换（--data-dir 重启）后写错目录——全部收敛到 resolve_data_dir()。
@@ -2044,6 +2150,7 @@ async fn main() {
         .route("/api/usage/profiles", get(usage_profiles))
         .route("/api/usage/reset", post(usage_reset))
         .route("/api/archives", get(archives_list))
+        .route("/api/fs/list", get(fs_list))
         .route("/api/archives/create", post(archive_create))
         .route("/api/archives/register", post(archive_register))
         .route("/api/archives/remove", post(archive_remove))

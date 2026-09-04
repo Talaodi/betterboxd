@@ -18,6 +18,7 @@ type Frame = {
   steps?: number;
   tokens?: { prompt: number; completion: number; hit?: number; miss?: number };
   cost?: { value: number; currency: string };
+  opening?: boolean;
 };
 
 export type Msg =
@@ -25,7 +26,8 @@ export type Msg =
   | {
       role: "assistant";
       text: string;
-      usage?: { prompt: number; completion: number };
+      usage?: { prompt: number; completion: number; hit?: number; miss?: number };
+      cost?: { value: number; currency: string };
       /** false=流式/中间步骤（渲染为进度行），true/undefined=正式回复（气泡+B logo） */
       final?: boolean;
     }
@@ -111,8 +113,8 @@ function handleFrame(s: Store, key: string, f: Frame) {
     case "hello": {
       s.sessionId = f.session_id ?? "";
       s.freshPending = false;
-      // fresh 新会话：服务端会发开场白（恢复的会话没有）
-      s.opening = s.freshPending && s.messages.length === 0;
+      // 开场白状态以服务端标记为准（fresh 新建=会发；恢复=不发）
+      s.opening = f.opening ?? false;
       // 历史恢复：内存为空时拉取该会话消息（刷新/重开抽屉后回填）
       if (s.sessionId && s.messages.length === 0) {
         fetch(`/api/chats/${s.sessionId}`)
@@ -120,12 +122,18 @@ function handleFrame(s: Store, key: string, f: Frame) {
           .then((d) => {
             if (!d || s.messages.length > 0 || s.streaming) return;
             const hist: Msg[] = (d.messages ?? [])
-              .map((m: { role: string; text?: string; name?: string }) =>
+              .map((m: { role: string; text?: string; name?: string; usage?: Msg & { usage?: unknown }; cost?: Msg }) =>
                 m.role === "tool"
                   ? ({ role: "tool", name: m.name ?? "tool" } as Msg)
                   : m.role === "user"
                     ? ({ role: "user", text: m.text ?? "" } as Msg)
-                    : ({ role: "assistant", text: m.text ?? "", final: true } as Msg),
+                    : ({
+                        role: "assistant",
+                        text: m.text ?? "",
+                        final: true,
+                        usage: m.usage as never,
+                        cost: m.cost as never,
+                      } as Msg),
               );
             if (hist.length) {
               s.messages = hist;
@@ -140,11 +148,20 @@ function handleFrame(s: Store, key: string, f: Frame) {
       s.acc += f.data ?? "";
       flushAssistant(s);
       break;
-    case "tool":
+    case "tool": {
       // 关键：跨 agent 步骤清空累积缓冲——否则下一步 token 会把上一步文本再拼一遍
       s.acc = "";
-      s.messages = [...s.messages, { role: "tool", name: f.name ?? "?" }];
+      // 移除尾部残留的 Thinking 空占位（tool_done 时插入；有 tool 帧说明进入下一步）
+      let msgs = s.messages;
+      while (msgs.length > 0) {
+        const last = msgs[msgs.length - 1];
+        if (last.role === "assistant" && last.final === false && !last.text.trim()) {
+          msgs = msgs.slice(0, -1);
+        } else break;
+      }
+      s.messages = [...msgs, { role: "tool", name: f.name ?? "?" }];
       break;
+    }
     case "tool_done":
       for (let i = s.messages.length - 1; i >= 0; i--) {
         const m = s.messages[i];
@@ -154,6 +171,13 @@ function handleFrame(s: Store, key: string, f: Frame) {
           copy[i] = { ...mm, ok: f.ok };
           s.messages = copy;
           break;
+        }
+      }
+      // 工具完成后模型还需思考下一步：插入 Thinking 占位（500ms 后不首 token 也持续显示）
+      {
+        const last = s.messages[s.messages.length - 1];
+        if (!(last?.role === "assistant" && last.final === false)) {
+          s.messages = [...s.messages, { role: "assistant", text: "", final: false }];
         }
       }
       break;
@@ -186,7 +210,7 @@ function handleFrame(s: Store, key: string, f: Frame) {
           if (s.acc) {
             s.messages = [
               ...s.messages.slice(0, -1),
-              { role: "assistant", text: s.acc, usage: f.tokens, final: true },
+              { role: "assistant", text: s.acc, usage: f.tokens, cost: f.cost, final: true },
             ];
           } else {
             s.messages = s.messages.slice(0, -1);

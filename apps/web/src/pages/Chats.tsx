@@ -269,6 +269,7 @@ export default function Chats() {
                   ? `和影迷助手聊聊《${pendingNew.movieTitle}》——它了解这部片和你的观影记录。`
                   : undefined
               }
+              onHello={loadChats}
               onSettled={(sid) => {
                 // 首轮流结束：会话已落盘 → 切回 open 模式（可删除/高亮），刷新列表
                 if (sid) {

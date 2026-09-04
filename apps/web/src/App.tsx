@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { HashRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import ArchivePicker from "./pages/ArchivePicker";
 import Diary from "./pages/Diary";
 import Films from "./pages/Films";
 import FilmDetail from "./pages/FilmDetail";
@@ -20,6 +22,10 @@ const NAV = [
 ];
 
 export default function App() {
+  const [picked, setPicked] = useState(() => sessionStorage.getItem("bb-archive-picked") === "1");
+  if (!picked) {
+    return <ArchivePicker onPicked={() => { sessionStorage.setItem("bb-archive-picked", "1"); setPicked(true); }} />;
+  }
   return (
     <HashRouter>
       <div className="flex h-full">

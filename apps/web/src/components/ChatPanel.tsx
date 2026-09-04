@@ -10,9 +10,10 @@ import remarkGfm from "remark-gfm";
 /** markdown 渲染容器：GFM 表格 + 暗色主题样式（表格/代码块/链接）。
  *  remark-breaks：单换行即换行——存量纯文本随记（手写换行排版）不折叠。 */
 export function Markdown({ children }: { children: string }) {
+  const clean = children.replace(/\n{3,}/g, "\n\n");
   return (
     <div className="prose prose-invert prose-sm max-w-none [&_a]:text-[#40bcf4] [&_code]:rounded [&_code]:bg-[#14181c] [&_code]:px-1 [&_li]:mb-0.5 [&_p]:mb-1 [&_strong]:text-white [&_table]:my-2 [&_table]:w-full [&_table]:text-xs [&_table]:leading-5 [&_td]:border [&_td]:border-[#2c3440] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[#2c3440] [&_th]:bg-[#1b222b] [&_th]:px-2 [&_th]:py-1">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{children}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{clean}</ReactMarkdown>
     </div>
   );
 }
@@ -57,6 +58,7 @@ export default function ChatPanel({
   header,
   placeholder = "和影迷助手聊聊…",
   hint,
+  onHello,
 }: {
   movieId?: number;
   entryId?: string;
@@ -68,6 +70,8 @@ export default function ChatPanel({
   freshKey?: string;
   /** 一轮流式结束（done/error）后回调（携带当前会话 id；Chats 页刷新列表/切换 open 模式） */
   onSettled?: (sessionId: string) => void;
+  /** WS hello 帧后触发（会话已落盘）：Chats 页借此立即刷新列表（新会话即时出现） */
+  onHello?: () => void;
   /** 删除当前会话（Chats 页标题行渲染删除按钮） */
   onDelete?: () => void;
   /** 自定义标题行文案（默认 控制台/💬片名） */
@@ -80,13 +84,22 @@ export default function ChatPanel({
       ? { movieId, entryId, reviewId, sessionId, freshKey }
       : undefined,
   );
-  const { messages, connected, streaming, opening, lastCost, pendingConfirm, sendUser, interrupt, resolveConfirm } =
+  const { messages, connected, streaming, opening, pendingConfirm, sendUser, interrupt, resolveConfirm } =
     chat;
   const [input, setInput] = useState("");
 
   // 流结束 → onSettled（ref 防回调身份变化触发 effect）
   const settledRef = useRef(onSettled);
   settledRef.current = onSettled;
+  const helloRef = useRef(onHello);
+  helloRef.current = onHello;
+  const prevSid = useRef("");
+  useEffect(() => {
+    if (chat.sessionId && chat.sessionId !== prevSid.current) {
+      prevSid.current = chat.sessionId;
+      setTimeout(() => helloRef.current?.(), 50);
+    }
+  }, [chat.sessionId]);
   const sidRef = useRef("");
   sidRef.current = chat.sessionId;
   const prevStreaming = useRef(false);
@@ -132,10 +145,13 @@ export default function ChatPanel({
 
       {/* 消息流 */}
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg border border-[#33414f] bg-[#1b222b] p-4">
-        {messages.length === 0 && (
+        {messages.length === 0 && !opening && (
           <p className="text-sm text-[#5a6b7c]">
             {hint ?? '对助手说点什么："帮我搜一下盗梦空间"、"今年我看了多少电影"、"记一下：刚看了XXX，X分"。'}
           </p>
+        )}
+        {opening && messages.length === 0 && (
+          <div className="animate-pulse pl-10 text-xs text-[#5a6b7c]">✱ Thinking…</div>
         )}
         {messages.map((m, i) => {
           // 工具调用进度行（无 B logo）
@@ -174,7 +190,7 @@ export default function ChatPanel({
                 )}
                 {m.role === "assistant" && m.usage && (
                   <span className="ml-2 text-[10px] text-[#5a6b7c]">
-                    [{m.usage.prompt}+{m.usage.completion} tok{lastCost ? ` · ${fmtCost(lastCost)}` : ""}]
+                    [{m.usage.prompt}+{m.usage.completion} tok{m.cost ? ` · ${fmtCost(m.cost)}` : ""}]
                   </span>
                 )}
               </span>
@@ -198,7 +214,7 @@ export default function ChatPanel({
 
       {/* 输入行 */}
       {opening && (
-        <p className="mt-1 text-xs text-[#5a6b7c]">助手正在开场，稍候…（可点「停止」打断）</p>
+        <p className="mt-1 text-xs text-[#5a6b7c]">助手正在开场…（可点「停止」打断）</p>
       )}
       <div className="mt-3 flex gap-2">
         <input
