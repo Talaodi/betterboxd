@@ -33,6 +33,8 @@ struct AppState {
     stats_db: DbHandle,
     sessions: Arc<SessionStore>,
     config: Arc<Mutex<Config>>,
+    /// config.toml 最近一次成功加载的 mtime（热加载比对用）
+    cfg_mtime: Arc<Mutex<Option<std::time::SystemTime>>>,
     /// 档案切换后原子重建（评审缺陷 3）：config_save 写入，读侧每轮快照
     client: Arc<std::sync::RwLock<Option<betterboxd_core::llm::ChatClient>>>,
     tmdb: Arc<std::sync::RwLock<TmdbClient>>,
@@ -1513,6 +1515,7 @@ async fn handle_chat(
             continue;
         };
         let tmdb = app.tmdb.read().unwrap().clone();
+        config_reload_if_changed(&app);
         let cfg_snapshot = app.config.lock().unwrap().clone();
         let mut task_session = current.clone();
         let ctx_inj_task = context_injection.clone();
@@ -1675,6 +1678,7 @@ async fn handle_chat(
 
 /// 配置读取（api_key 打码）。
 async fn config_get(State(app): State<App>) -> Response {
+    config_reload_if_changed(&app);
     let cfg = app.config.lock().unwrap().clone();
     let mut v = serde_json::to_value(&cfg).unwrap_or(json!({}));
     if let Some(profiles) = v.get_mut("profiles").and_then(|p| p.as_array_mut()) {
@@ -1717,30 +1721,60 @@ async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json:
             if c.save(&path).is_err() {
                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "配置保存失败").into_response();
             }
-            // TMDB Key 更新：重建 TmdbClient（与 AI 配置分离，独立一行）
-            *app.tmdb.write().unwrap() = TmdbClient::new(
-                c.tmdb.key.clone(),
-                c.tmdb.proxy.clone(),
-                c.tmdb.language.clone(),
-            );
-            // 缺陷 3：档案切换后原子重建 client（下轮对话即生效）
-            let (client, pname, pmodel) = match c.active() {
-                Ok(p) => (
-                    Some(betterboxd_core::llm::ChatClient::new(
-                        &p.endpoint, &p.api_key, &p.model,
-                    )),
-                    p.name.clone(),
-                    p.model.clone(),
-                ),
-                Err(_) => (None, String::new(), String::new()),
-            };
-            *app.client.write().unwrap() = client;
-            *app.profile_name.lock().unwrap() = pname;
-            *app.profile_model.lock().unwrap() = pmodel;
-            *app.config.lock().unwrap() = c;
+            *app.cfg_mtime.lock().unwrap() = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+            apply_runtime(&app, c);
             axum::Json(json!({"ok": true})).into_response()
         }
         Err(e) => (axum::http::StatusCode::BAD_REQUEST, format!("配置解析失败: {e}")).into_response(),
+    }
+}
+
+/// 配置变更统一落到运行时（config_save 与热加载共用）：tmdb/client/档案/快照一体更新。
+fn apply_runtime(app: &AppState, c: Config) {
+    // TMDB Key 更新：重建 TmdbClient（与 AI 配置分离，独立一行）
+    *app.tmdb.write().unwrap() = TmdbClient::new(
+        c.tmdb.key.clone(),
+        c.tmdb.proxy.clone(),
+        c.tmdb.language.clone(),
+    );
+    // 缺陷 3：档案切换后原子重建 client（下轮对话即生效）
+    let (client, pname, pmodel) = match c.active() {
+        Ok(p) => (
+            Some(betterboxd_core::llm::ChatClient::new(
+                &p.endpoint, &p.api_key, &p.model,
+            )),
+            p.name.clone(),
+            p.model.clone(),
+        ),
+        Err(_) => (None, String::new(), String::new()),
+    };
+    *app.client.write().unwrap() = client;
+    *app.profile_name.lock().unwrap() = pname;
+    *app.profile_model.lock().unwrap() = pmodel;
+    *app.config.lock().unwrap() = c;
+}
+
+/// config.toml 运行时热加载：外部修改（手动编辑/直接复制替换）后，配置类入口首次访问即生效，无需重启。
+/// 解析失败（文件被写坏）时保留旧配置并警告，文件再次变化（修复后）自动重试。
+fn config_reload_if_changed(app: &AppState) {
+    let cfg_path = data_dir_path().join(".betterboxd/config.toml");
+    let Ok(md) = std::fs::metadata(&cfg_path) else { return };
+    let mtime = md.modified().ok();
+    let mut known = app.cfg_mtime.lock().unwrap();
+    if *known == mtime {
+        return;
+    }
+    match betterboxd_core::config::Config::load(&cfg_path) {
+        Ok(c) => {
+            *known = mtime;
+            apply_runtime(&app, c);
+        }
+        Err(e) => {
+            // 保持 known=旧时间: 下次入口再试? 会刷屏+空转; 置为当前 mtime, 文件再变(修复)才重试
+            let now = std::fs::metadata(&cfg_path).ok().and_then(|m| m.modified().ok());
+            *known = now;
+            eprintln!("config.toml 热加载失败(保留旧配置): {e}");
+        }
     }
 }
 
@@ -2264,6 +2298,13 @@ async fn main() {
         stats_db,
         sessions,
         config: Arc::new(Mutex::new(config)),
+        cfg_mtime: Arc::new(Mutex::new(
+            data_dir_path()
+                .join(".betterboxd/config.toml")
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok()),
+        )),
         client,
         tmdb,
         profile_name: Arc::new(Mutex::new(pname)),
