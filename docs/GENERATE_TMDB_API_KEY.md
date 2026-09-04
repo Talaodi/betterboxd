@@ -1,7 +1,5 @@
 # 如何获取 TMDB API Key
 
-Betterboxd 使用 [TMDB（The Movie Database）](https://www.themoviedb.org) 作为影片元数据源（海报、年份、导演、类型等）。按 TMDB 的要求，API Key 不得公开传播——请自行注册一个（免费，约 5 分钟）。
-
 ## 步骤
 
 1. **注册账号**
