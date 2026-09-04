@@ -32,7 +32,6 @@ export default function Settings() {
   const [editing, setEditing] = useState<number | null>(null); // 编辑中的 profile 下标
   const [draft, setDraft] = useState<Profile | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   const reload = () => {
     getJson<Config>("/api/config").then(setConfig).catch((e) => alert(e.message));
@@ -46,8 +45,6 @@ export default function Settings() {
     setSaving(true);
     try {
       await sendJson("/api/config", "POST", cfg);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
       reload();
     } catch (e) {
       alert(`保存失败: ${(e as Error).message}`);
@@ -229,13 +226,6 @@ export default function Settings() {
         </div>
       )}
 
-      <button
-        className="rounded bg-[#00e054] px-6 py-2 text-sm font-medium text-[#0c1a10] disabled:opacity-40"
-        onClick={() => save(config)}
-        disabled={saving}
-      >
-        {saving ? "保存中…" : saved ? "✓ 已保存" : "保存全局设置"}
-      </button>
     </div>
   );
 }
