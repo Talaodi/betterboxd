@@ -2203,7 +2203,11 @@ fn resolve_data_dir() -> std::path::PathBuf {
             }
         }
     }
-    std::path::PathBuf::from("data")
+    // 无 active 存档：悬置态——不落任何用户目录（坚决不建 data/ 默认存档），
+    // 暂存系统临时目录；选择屏显示空列表，用户新建/载入后重启归位。
+    let mut t = std::env::temp_dir();
+    t.push("betterboxd-anon");
+    t
 }
 
 #[tokio::main]
