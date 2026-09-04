@@ -133,7 +133,6 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
               <div key={a.dir} className={"flex items-center justify-between rounded-lg border px-4 py-3 " + (isMissing ? "border-[#5a3a3a] bg-[#1b1414]" : "border-[#33414f] bg-[#1b222b]")}>
                 <div className="min-w-0">
                   <span className="font-medium text-white">{a.name}</span>
-                  {archives?.active_dir === a.dir && <span className="ml-2 text-xs text-[#00e054]">● 当前</span>}
                   {isMissing && <span className="ml-2 text-xs text-[#ff8000]">⚠ 已丢失</span>}
                   <div className="truncate text-xs text-[#5a6b7c]">{a.dir}</div>
                 </div>
@@ -145,15 +144,13 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
                   >
                     {isMissing ? "检查" : "进入"}
                   </button>
-                  {archives?.active_dir !== a.dir && (
-                    <button
-                      className="shrink-0 rounded border border-[#5a3a3a] px-3 py-1 text-sm text-[#ff8000] disabled:opacity-40"
-                      disabled={switching}
-                      onClick={() => delArchive(a)}
-                    >
-                      🗑
-                    </button>
-                  )}
+                  <button
+                    className="shrink-0 rounded border border-[#5a3a3a] px-3 py-1 text-sm text-[#ff8000] disabled:opacity-40"
+                    disabled={switching}
+                    onClick={() => delArchive(a)}
+                  >
+                    🗑
+                  </button>
                 </div>
               </div>
             );

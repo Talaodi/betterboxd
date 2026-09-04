@@ -1872,7 +1872,8 @@ async fn archive_create(State(app): State<App>, Json(args): Json<serde_json::Val
     let list = v["archives"].as_array().cloned().unwrap_or_default();
     let mut list = list;
     list.retain(|a| a["dir"].as_str() != Some(dir.to_string_lossy().as_ref()));
-    list.push(serde_json::json!({"name": name, "dir": dir.to_string_lossy().to_string()}));
+    list.push(serde_json::json!({"name": name, "dir": dir.to_string_lossy().to_string(),
+        "last_accessed": betterboxd_core::now()}));
     v["archives"] = serde_json::Value::Array(list);
     v["active_dir"] = serde_json::json!(dir.to_string_lossy().to_string());
     if write_archives(&v).is_err() {
