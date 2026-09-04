@@ -1,0 +1,248 @@
+{
+  "id": "01a06bbd-581b-7782-85fe-d9f12b42fec8",
+  "scope": "global",
+  "movie_id": null,
+  "entry_id": null,
+  "review_id": null,
+  "title": "示例：客观数据统计",
+  "created_at": 1788513966,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "你好，我是 Betterboxd，你的观影数据助手。我可以帮你记录和查询每一部看过或想看的片，统计你的偏好与趋势，也能和你聊聊最近看的电影、聊聊导演与类型，或者帮你从个人片库里找点灵感。今天想从哪开始呢？比如「记一笔新看的电影」「统计今年偏好」，或者「聊聊我最近看的片」？",
+      "usage": {
+        "prompt": 530,
+        "completion": 142,
+        "hit": 0,
+        "miss": 530
+      },
+      "cost": {
+        "value": 0.002868,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "统计一下我平均分最高的月份"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_00_IrzsPlwiACv780iQOo3n2483",
+          "type": "function",
+          "function": {
+            "name": "list_saved_queries",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_IrzsPlwiACv780iQOo3n2483",
+      "content": "{\"saved_queries\":[]}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_00_ADmzb4CodoXXNRcmv5jv7125",
+          "type": "function",
+          "function": {
+            "name": "run_stats",
+            "arguments": "{\"sql\": \"SELECT strftime('%Y-%m', watched_date) AS 月份, ROUND(AVG(rating), 1) AS 平均分, COUNT(*) AS 记录数 FROM v_diary_full WHERE rating IS NOT NULL GROUP BY 月份 ORDER BY 平均分 DESC LIMIT 12\", \"chart\": {\"type\": \"table\", \"title\": \"各月平均分排行\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_ADmzb4CodoXXNRcmv5jv7125",
+      "content": "{\"columns\":[\"月份\",\"平均分\",\"记录数\"],\"rows\":[{\"月份\":\"2025-10\",\"平均分\":80.0,\"记录数\":1},{\"月份\":\"2025-09\",\"平均分\":80.0,\"记录数\":2},{\"月份\":\"2026-07\",\"平均分\":78.3,\"记录数\":12},{\"月份\":\"2026-04\",\"平均分\":78.3,\"记录数\":6},{\"月份\":\"2026-01\",\"平均分\":77.5,\"记录数\":4},{\"月份\":\"2026-05\",\"平均分\":75.0,\"记录数\":2},{\"月份\":\"2026-03\",\"平均分\":70.0,\"记录数\":1}],\"total_rows\":7,\"truncated\":false,\"chart\":{\"type\":\"table\",\"title\":\"各月平均分排行\"},\"note\":\"\",\"saved_query_id\":null}"
+    },
+    {
+      "role": "assistant",
+      "content": "📈 你的各月平均分排行如下（按平均分从高到低）：\n\n| 月份 | 平均分 | 记录数 |\n|---|---|---|\n| 2025-10 | 80.0 | 1 |\n| 2025-09 | 80.0 | 2 |\n| 2026-07 | 78.3 | 12 |\n| 2026-04 | 78.3 | 6 |\n| 2026-01 | 77.5 | 4 |\n| 2026-05 | 75.0 | 2 |\n| 2026-03 | 70.0 | 1 |\n\n🏆 **平均分最高的月份是 2025-09 和 2025-10，都是 80 分**。\n\n不过要提醒一下：这两个月份记录都不多（9月2条、10月1条），样本偏小。如果看**记录数多且分也高**的，其实是 **2026-07（12 条，平均 78.3）** 和 **2026-04（6 条，平均 78.3）**，这两个月你量还不少、眼光也稳定。\n\n要不要我帮你按「至少看 X 部才能上榜」来过滤一下，排除那些只有一两条的高分孤例？或者把这个统计存成一个项目，方便你以后随时复跑？",
+      "usage": {
+        "prompt": 13149,
+        "completion": 972,
+        "hit": 9728,
+        "miss": 3421
+      },
+      "cost": {
+        "value": 0.0199838,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "直接保存。"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_00_9p5zFGAGlYxOM7Fn9Ms91272",
+          "type": "function",
+          "function": {
+            "name": "manage_saved_queries",
+            "arguments": "{\"action\": \"create\", \"name\": \"各月平均分排行\", \"sql\": \"SELECT strftime('%Y-%m', watched_date) AS 月份, ROUND(AVG(rating), 1) AS 平均分, COUNT(*) AS 记录数 FROM v_diary_full WHERE rating IS NOT NULL GROUP BY 月份 ORDER BY 平均分 DESC LIMIT 12\", \"chart\": {\"type\": \"table\", \"title\": \"各月平均分排行\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_9p5zFGAGlYxOM7Fn9Ms91272",
+      "content": "{\"ok\":true,\"saved_query_id\":\"01a06bbd-d787-7990-a81f-1c7d96a78970\",\"name\":\"各月平均分排行\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "✅ 已保存统计项目「各月平均分排行」，下次直接告诉我「跑一下各月平均分」就能复现结果，不用重新写。\n\n还需要我顺手把过滤样本（比如「至少看 3 部」）也存一个，或者做点别的吗？",
+      "usage": {
+        "prompt": 10075,
+        "completion": 299,
+        "hit": 9472,
+        "miss": 603
+      },
+      "cost": {
+        "value": 0.0054472,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "统计一下我的最长观影间隔"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_00_bIqji1vXYCnZ5hS1zxBz0051",
+          "type": "function",
+          "function": {
+            "name": "run_stats",
+            "arguments": "{\"sql\": \"SELECT watched_date AS 日期, title_zh AS 片名, CAST(julianday(watched_date) - julianday(LAG(watched_date) OVER (ORDER BY watched_date)) AS INTEGER) AS 间隔天数 FROM v_diary_full WHERE watched_date IS NOT NULL ORDER BY 间隔天数 DESC LIMIT 10\", \"chart\": {\"type\": \"table\", \"title\": \"最长观影间隔\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_bIqji1vXYCnZ5hS1zxBz0051",
+      "content": "{\"columns\":[\"日期\",\"片名\",\"间隔天数\"],\"rows\":[{\"日期\":\"2025-08-31\",\"片名\":\"穆赫兰道\",\"间隔天数\":391},{\"日期\":\"2026-01-18\",\"片名\":\"现代启示录\",\"间隔天数\":67},{\"日期\":\"2026-03-17\",\"片名\":\"楚门的世界\",\"间隔天数\":45},{\"日期\":\"2026-07-02\",\"片名\":\"过春天\",\"间隔天数\":37},{\"日期\":\"2025-10-30\",\"片名\":\"侧耳倾听\",\"间隔天数\":31},{\"日期\":\"2025-09-29\",\"片名\":\"天空之城\",\"间隔天数\":22},{\"日期\":\"2026-04-08\",\"片名\":\"五至七时的克莱奥\",\"间隔天数\":22},{\"日期\":\"2026-05-15\",\"片名\":\"寂静的朋友\",\"间隔天数\":19},{\"日期\":\"2025-11-12\",\"片名\":\"雨果的假期\",\"间隔天数\":13},{\"日期\":\"2026-01-31\",\"片名\":\"闪灵\",\"间隔天数\":11}],\"total_rows\":10,\"truncated\":false,\"chart\":{\"type\":\"table\",\"title\":\"最长观影间隔\"},\"note\":\"\",\"saved_query_id\":null}"
+    },
+    {
+      "role": "assistant",
+      "content": "📈 你的观影间隔（相邻两次记录之间的天数）最长的一段如下（按间隔天数降序）：\n\n| 日期 | 片名 | 与上一次相隔 |\n|---|---|---|\n| 2025-08-31 | 穆赫兰道 | 391 天 |\n| 2026-01-18 | 现代启示录 | 67 天 |\n| 2026-03-17 | 楚门的世界 | 45 天 |\n| 2026-07-02 | 过春天 | 37 天 |\n| 2025-10-30 | 侧耳倾听 | 31 天 |\n| 2025-09-29 | 天空之城 | 22 天 |\n\n⚠️ 需要说明的是：排在**第一位「穆赫兰道（391 天）」其实是你的第一条观影记录**，它前面没有更早的数据，这段「间隔」是从开始记账算起的初始空档，不是真正的两次观影之间的空窗。\n\n所以真正的**最长连续观影间隔是 2026-01-18《现代启示录》之前的 67 天**（上一次记录是 2025-11-12《雨果的假期》）。其次是 45 天（《楚门的世界》）、37 天（《过春天》）。\n\n顺便说一句：你从 2026 年起记录密度明显上来了，2026 年内的间隔基本都在 10 多天以内，比较稳定。需要我把「最长观影间隔」存成统计项目吗？还是再看看别的？",
+      "usage": {
+        "prompt": 10858,
+        "completion": 1531,
+        "hit": 10240,
+        "miss": 618
+      },
+      "cost": {
+        "value": 0.016656999999999998,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "穆赫兰道并非第一条观影记录吧？"
+    },
+    {
+      "role": "assistant",
+      "content": "你说得对，我需要核实一下。我查一下你的观影记录最早的几条。",
+      "tool_calls": [
+        {
+          "id": "call_00_pkJKkyk6JSRkyv8qLuw74950",
+          "type": "function",
+          "function": {
+            "name": "lookup_diary",
+            "arguments": "{\"limit\": 10}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_pkJKkyk6JSRkyv8qLuw74950",
+      "content": "{\"count\":10,\"rows\":[{\"entry_id\":\"01a06b99-fa4f-7f71-a5cf-1fcc8a4c8d1d\",\"title_zh\":\"茫然女王\",\"title_en\":null,\"watched_date\":\"2026-07-26\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"社会议题？回归私人。看完也茫然了。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-f7f5-79c1-a2a9-4964aea38353\",\"title_zh\":\"假面\",\"title_en\":null,\"watched_date\":\"2026-07-26\",\"rating\":null,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-f4c3-7740-a4ea-b850374fd2e4\",\"title_zh\":\"痴迷\",\"title_en\":null,\"watched_date\":\"2026-07-24\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":4870,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[]\"},{\"entry_id\":\"01a06b99-e7d7-72c3-bc54-3267e0461748\",\"title_zh\":\"我在伊朗长大\",\"title_en\":null,\"watched_date\":\"2026-07-19\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"美术风格很绝。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-e603-7273-b9cf-bbe8f6567269\",\"title_zh\":\"南方\",\"title_en\":null,\"watched_date\":\"2026-07-18\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-e40c-7f30-8d7a-5a8922faf06b\",\"title_zh\":\"探戈，加德尔的放逐\",\"title_en\":null,\"watched_date\":\"2026-07-18\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"乡愁。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-e18b-7960-b674-d591ebfbb032\",\"title_zh\":\"旅行\",\"title_en\":null,\"watched_date\":\"2026-07-12\",\"rating\":100,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":8000,\"private_note\":\"魔幻现实的南美之旅。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-de72-71f1-9045-3dd1b12ce5d3\",\"title_zh\":\"两生花\",\"title_en\":null,\"watched_date\":\"2026-07-11\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"极度细腻的情绪，难以捉摸。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-d296-7d51-a608-a4adf78136dd\",\"title_zh\":\"分手的决心\",\"title_en\":null,\"watched_date\":\"2026-07-08\",\"rating\":90,\"in_theater\":0,\"liked\":0,\"ticket_price_cents\":0,\"private_note\":\"汤唯的中文台词怎么这么尬。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[]\"},{\"entry_id\":\"01a06b99-c656-70b0-ac1a-59471ebc4a9d\",\"title_zh\":\"原始星球\",\"title_en\":null,\"watched_date\":\"2026-07-05\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":5000,\"private_note\":\"脑洞大开。但是节奏不好。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"}]}"
+    },
+    {
+      "role": "assistant",
+      "content": "你说得对，我不该凭那条初始空档就断言「穆赫兰道是第一条」。我查一下你**最早的几条**记录确认。",
+      "tool_calls": [
+        {
+          "id": "call_00_KNKtwL7dIveGn4Nbxslv9381",
+          "type": "function",
+          "function": {
+            "name": "run_stats",
+            "arguments": "{\"sql\": \"SELECT watched_date AS 观看日期, title_zh AS 片名 FROM v_diary_full WHERE watched_date IS NOT NULL ORDER BY watched_date ASC LIMIT 6\", \"chart\": {\"type\": \"table\", \"title\": \"最早观影记录\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_KNKtwL7dIveGn4Nbxslv9381",
+      "content": "{\"columns\":[\"观看日期\",\"片名\"],\"rows\":[{\"观看日期\":\"2024-08-05\",\"片名\":\"你的名字。\"},{\"观看日期\":\"2025-08-31\",\"片名\":\"穆赫兰道\"},{\"观看日期\":\"2025-09-07\",\"片名\":\"穆赫兰道\"},{\"观看日期\":\"2025-09-29\",\"片名\":\"天空之城\"},{\"观看日期\":\"2025-10-30\",\"片名\":\"侧耳倾听\"},{\"观看日期\":\"2025-11-12\",\"片名\":\"雨果的假期\"}],\"total_rows\":6,\"truncated\":false,\"chart\":{\"type\":\"table\",\"title\":\"最早观影记录\"},\"note\":\"\",\"saved_query_id\":null}"
+    },
+    {
+      "role": "assistant",
+      "content": "你说得完全正确，我之前判断错了。\n\n你**最早的记录是 2024-08-05《你的名字。》**，比《穆赫兰道》早了整整一年。而且《穆赫兰道》在 2025-08-31 和 2025-09-07 各有一条（应该是同年二刷）。\n\n所以那段 **391 天的间隔其实是「《你的名字。》→《穆赫兰道》」之间的空档**，第一条记录前面并没有更早的数据，我当时误把它当成了「初始空档」。抱歉，是我漏了更早的这条。\n\n那我重新修正一下真正的**最长连续观影间隔**：\n\n- **2024-08-05《你的名字。》→ 2025-08-31《穆赫兰道》**：相隔 **391 天**，这是你迄今最长的一段观影空窗。\n- 之后是 67 天（《现代启示录》前）、45 天（《楚门的世界》前）……\n\n所以「最长观影间隔」就是这段 391 天的空档。要我把这个统计存成项目吗？或者还要我再看一下是不是有别的该注意的？",
+      "usage": {
+        "prompt": 20733,
+        "completion": 878,
+        "hit": 18688,
+        "miss": 2045
+      },
+      "cost": {
+        "value": 0.015905799999999998,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "保存成统计项目"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_00_ET_4uWLHT0OCmF2Agjry1eb8144",
+          "type": "function",
+          "function": {
+            "name": "manage_saved_queries",
+            "arguments": "{\"action\": \"create\", \"name\": \"最长观影间隔\", \"sql\": \"SELECT watched_date AS 日期, title_zh AS 片名, CAST(julianday(watched_date) - julianday(LAG(watched_date) OVER (ORDER BY watched_date)) AS INTEGER) AS 间隔天数 FROM v_diary_full WHERE watched_date IS NOT NULL ORDER BY 间隔天数 DESC LIMIT 10\", \"chart\": {\"type\": \"table\", \"title\": \"最长观影间隔\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_ET_4uWLHT0OCmF2Agjry1eb8144",
+      "content": "{\"ok\":true,\"saved_query_id\":\"01a06bbf-03a0-73e1-9bf7-2c472b9e9f52\",\"name\":\"最长观影间隔\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "✅ 已保存统计项目「最长观影间隔」，下次直接说「跑一下最长观影间隔」就能复现。\n\n目前你已保存了两个统计项目：\n1. **各月平均分排行**\n2. **最长观影间隔**\n\n还需要做点别的吗？",
+      "usage": {
+        "prompt": 15813,
+        "completion": 235,
+        "hit": 15616,
+        "miss": 197
+      },
+      "cost": {
+        "value": 0.0042676,
+        "currency": "CNY"
+      }
+    }
+  ]
+}

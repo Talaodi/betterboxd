@@ -1,0 +1,30 @@
+active_profile = "Deepseek"
+
+[[profiles]]
+name = "Deepseek"
+endpoint = "https://api.deepseek.com"
+api_key = ""
+model = "deepseek-v4-flash-vision-exp"
+context_length = 1000000
+thinking_mode = "off"
+currency = "CNY"
+budget = 0.05
+
+[profiles.pricing]
+input_cached = 0.1
+input_uncached = 3.0
+output_cached = 0.0
+output_uncached = 9.0
+
+[tmdb]
+key = ""
+language = "zh-CN"
+
+[billing]
+display_currency = "CNY"
+
+[billing.fx_rates]
+
+[display]
+title_main = "zh"
+title_sub = "original"

@@ -1,0 +1,345 @@
+{
+  "id": "01a06bbf-80d4-7630-8999-f6b39668d8d0",
+  "scope": "global",
+  "movie_id": null,
+  "entry_id": null,
+  "review_id": null,
+  "title": "示例：电影推荐，一键加入 Watchlist",
+  "created_at": 1788514107,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "你好，我是 Betterboxd，你的观影数据助手。我可以帮你记录和查询每部电影，统计类型、导演和同伴偏好，也能和你聊最近看过的片子、推推荐，或者整理你的心愿清单。今天想从哪开始——是记一笔新看的电影，统计一下今年的口味变化，还是聊聊你最近看的那些片？",
+      "usage": {
+        "prompt": 530,
+        "completion": 107,
+        "hit": 512,
+        "miss": 18
+      },
+      "cost": {
+        "value": 0.0010682,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "请给我推荐一些电影，根据我的喜好。"
+    },
+    {
+      "role": "assistant",
+      "content": "我先看看你的观影档案和已看记录，再结合你的口味来做推荐。",
+      "tool_calls": [
+        {
+          "id": "call_00_OvDZmFRoy4YFooL6EtEs6319",
+          "type": "function",
+          "function": {
+            "name": "get_profile_snapshot",
+            "arguments": "{}"
+          }
+        },
+        {
+          "id": "call_01_lBHdMhwLTkXL6IozFksQ8919",
+          "type": "function",
+          "function": {
+            "name": "lookup_diary",
+            "arguments": "{\"limit\": 30}"
+          }
+        },
+        {
+          "id": "call_02_F2qu2oOKoydkNjCqstgJ0930",
+          "type": "function",
+          "function": {
+            "name": "lookup_lists",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_OvDZmFRoy4YFooL6EtEs6319",
+      "content": "{\"总量\":32,\"今年\":26,\"平均分\":77.9,\"top类型\":[{\"g\":\"Drama\",\"n\":22},{\"g\":\"Thriller\",\"n\":9},{\"g\":\"Animation\",\"n\":7},{\"g\":\"Mystery\",\"n\":5},{\"g\":\"Romance\",\"n\":4}],\"top导演\":[{\"d\":\"Fernando E. Solanas\",\"n\":3},{\"d\":\"David Lynch\",\"n\":3},{\"d\":\"René Laloux\",\"n\":2},{\"d\":\"Peter Weir\",\"n\":2},{\"d\":\"Park Chan-wook\",\"n\":2}],\"top同伴\":[{\"c\":\"{\\\"dimension\\\":\\\"同伴\\\",\\\"name\\\":\\\"SY\\\"}\",\"n\":1},{\"c\":\"{\\\"dimension\\\":\\\"同伴\\\",\\\"name\\\":\\\"LCM\\\"}\",\"n\":1}],\"最近观看\":[{\"title_zh\":\"假面\",\"rating\":null,\"watched_date\":\"2026-07-26\"},{\"title_zh\":\"茫然女王\",\"rating\":80,\"watched_date\":\"2026-07-26\"},{\"title_zh\":\"痴迷\",\"rating\":70,\"watched_date\":\"2026-07-24\"},{\"title_zh\":\"我在伊朗长大\",\"rating\":70,\"watched_date\":\"2026-07-19\"},{\"title_zh\":\"南方\",\"rating\":80,\"watched_date\":\"2026-07-18\"}],\"写作面\":{\"影评总数\":1,\"近30天\":1}}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_lBHdMhwLTkXL6IozFksQ8919",
+      "content": "{\"count\":20,\"rows\":[{\"entry_id\":\"01a06b99-fa4f-7f71-a5cf-1fcc8a4c8d1d\",\"title_zh\":\"茫然女王\",\"title_en\":null,\"watched_date\":\"2026-07-26\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"社会议题？回归私人。看完也茫然了。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-f7f5-79c1-a2a9-4964aea38353\",\"title_zh\":\"假面\",\"title_en\":null,\"watched_date\":\"2026-07-26\",\"rating\":null,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-f4c3-7740-a4ea-b850374fd2e4\",\"title_zh\":\"痴迷\",\"title_en\":null,\"watched_date\":\"2026-07-24\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":4870,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[]\"},{\"entry_id\":\"01a06b99-e7d7-72c3-bc54-3267e0461748\",\"title_zh\":\"我在伊朗长大\",\"title_en\":null,\"watched_date\":\"2026-07-19\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"美术风格很绝。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-e603-7273-b9cf-bbe8f6567269\",\"title_zh\":\"南方\",\"title_en\":null,\"watched_date\":\"2026-07-18\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-e40c-7f30-8d7a-5a8922faf06b\",\"title_zh\":\"探戈，加德尔的放逐\",\"title_en\":null,\"watched_date\":\"2026-07-18\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"乡愁。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-e18b-7960-b674-d591ebfbb032\",\"title_zh\":\"旅行\",\"title_en\":null,\"watched_date\":\"2026-07-12\",\"rating\":100,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":8000,\"private_note\":\"魔幻现实的南美之旅。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-de72-71f1-9045-3dd1b12ce5d3\",\"title_zh\":\"两生花\",\"title_en\":null,\"watched_date\":\"2026-07-11\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"极度细腻的情绪，难以捉摸。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-d296-7d51-a608-a4adf78136dd\",\"title_zh\":\"分手的决心\",\"title_en\":null,\"watched_date\":\"2026-07-08\",\"rating\":90,\"in_theater\":0,\"liked\":0,\"ticket_price_cents\":0,\"private_note\":\"汤唯的中文台词怎么这么尬。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[]\"},{\"entry_id\":\"01a06b99-c656-70b0-ac1a-59471ebc4a9d\",\"title_zh\":\"原始星球\",\"title_en\":null,\"watched_date\":\"2026-07-05\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":5000,\"private_note\":\"脑洞大开。但是节奏不好。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-c865-7e10-9c31-89af6362dfc0\",\"title_zh\":\"时间之主\",\"title_en\":null,\"watched_date\":\"2026-07-05\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":5000,\"private_note\":\"跨越宇宙去救儿时的自己。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-bc86-7f41-9d52-ae003fdc130b\",\"title_zh\":\"无可奈何\",\"title_en\":null,\"watched_date\":\"2026-07-04\",\"rating\":90,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":4000,\"private_note\":\"黑色幽默。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06b99-b246-7150-8b11-1b8594792609\",\"title_zh\":\"过春天\",\"title_en\":null,\"watched_date\":\"2026-07-02\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"谁能想到走私绑手机的场景能那么暧昧。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"}]\"},{\"entry_id\":\"01a06ba8-efce-7913-9964-6756e971f672\",\"title_zh\":\"谍影重重2\",\"title_en\":null,\"watched_date\":\"2026-05-26\",\"rating\":60,\"in_theater\":0,\"liked\":0,\"ticket_price_cents\":null,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"场景\\\",\\\"name\\\":\\\"电影音乐赏析\\\"}]\"},{\"entry_id\":\"01a06ba8-ce55-7ec1-a7fb-1ea27bbd32ba\",\"title_zh\":\"寂静的朋友\",\"title_en\":null,\"watched_date\":\"2026-05-15\",\"rating\":90,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":3500,\"private_note\":\"有灵气。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"清华大礼堂\\\"}]\"},{\"entry_id\":\"01a06ba8-b68e-7771-99ae-ac66cfd49a38\",\"title_zh\":\"恐怖份子\",\"title_en\":null,\"watched_date\":\"2026-04-26\",\"rating\":100,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"工整，冷峻。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"场景\\\",\\\"name\\\":\\\"北京国际电影节\\\"}]\"},{\"entry_id\":\"01a06ba8-3373-7cd2-9c59-78680e7b95ee\",\"title_zh\":\"机器人总动员\",\"title_en\":null,\"watched_date\":\"2026-04-25\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":7000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"},{\\\"dimension\\\":\\\"场景\\\",\\\"name\\\":\\\"北京国际电影节\\\"}]\"},{\"entry_id\":\"01a06ba8-1dcb-7663-9e41-8dc7019b745c\",\"title_zh\":\"死亡诗社\",\"title_en\":null,\"watched_date\":\"2026-04-20\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":8000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"地点\\\",\\\"name\\\":\\\"中国电影资料馆\\\"},{\\\"dimension\\\":\\\"场景\\\",\\\"name\\\":\\\"北京国际电影节\\\"}]\"},{\"entry_id\":\"01a06ba7-fdf0-7453-b43f-31cff99413cf\",\"title_zh\":\"蓝白红三部曲之蓝\",\"title_en\":null,\"watched_date\":\"2026-04-17\",\"rating\":80,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"情绪比较跟得上的一部克氏电影。\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"场景\\\",\\\"name\\\":\\\"北京国际电影节\\\"}]\"},{\"entry_id\":\"01a06ba7-ec48-7753-a2b0-af908464fc6d\",\"title_zh\":\"蔑视\",\"title_en\":null,\"watched_date\":\"2026-04-17\",\"rating\":70,\"in_theater\":1,\"liked\":0,\"ticket_price_cents\":6000,\"private_note\":\"\",\"rewatch_index\":1,\"tags\":\"[]\",\"dimensions_flat\":\"[{\\\"dimension\\\":\\\"场景\\\",\\\"name\\\":\\\"北京国际电影节\\\"}]\"}]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_F2qu2oOKoydkNjCqstgJ0930",
+      "content": "{\"lists\":[{\"list_id\":\"01a06baf-eec8-7211-a7e8-c2296e6ddb60\",\"name\":\"2025~2026 年度十佳\",\"source\":\"manual\",\"ranked\":1,\"members\":10}]}"
+    },
+    {
+      "role": "assistant",
+      "content": "我先看看你的年度十佳清单，再结合口味拉一批候选片的元数据来核对。",
+      "tool_calls": [
+        {
+          "id": "call_00_JMKPSBAilWRTXy2iSNm92201",
+          "type": "function",
+          "function": {
+            "name": "lookup_lists",
+            "arguments": "{\"list_id\": \"01a06baf-eec8-7211-a7e8-c2296e6ddb60\"}"
+          }
+        },
+        {
+          "id": "call_01_t2ExtQ6KOrdjiKEwbijm4657",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"穆赫兰道\"}"
+          }
+        },
+        {
+          "id": "call_02_JjkmRexojWy7jXtuwkqz7654",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"潜行者\"}"
+          }
+        },
+        {
+          "id": "call_03_evUguJG18QiFeTIRDMmX6528",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"燃烧\"}"
+          }
+        },
+        {
+          "id": "call_04_q6s8gZh4pifHhs3CJ78C2598",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"阿基米德王子历险记\"}"
+          }
+        },
+        {
+          "id": "call_05_hSKquRhBLefNQ32BdkFq6947",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"诗\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_JMKPSBAilWRTXy2iSNm92201",
+      "content": "{\"count\":10,\"items\":[{\"movie_id\":1018,\"rank\":1,\"title_main\":\"穆赫兰道\",\"title_sub\":\"Mulholland Drive\",\"title_zh\":\"穆赫兰道\",\"title_en\":null,\"year\":\"2001\",\"my_rating\":100,\"tmdb_rating\":7.799,\"added_at\":1788513115},{\"movie_id\":194,\"rank\":2,\"title_main\":\"天使爱美丽\",\"title_sub\":\"Le Fabuleux Destin d'Amélie Poulain\",\"title_zh\":\"天使爱美丽\",\"title_en\":null,\"year\":\"2001\",\"my_rating\":null,\"tmdb_rating\":7.92,\"added_at\":1788513117},{\"movie_id\":2346,\"rank\":3,\"title_main\":\"三峡好人\",\"title_sub\":\"三峡好人\",\"title_zh\":\"三峡好人\",\"title_en\":null,\"year\":\"2006\",\"my_rating\":null,\"tmdb_rating\":7.22,\"added_at\":1788513120},{\"movie_id\":19426,\"rank\":4,\"title_main\":\"卡比利亚之夜\",\"title_sub\":\"Le notti di Cabiria\",\"title_zh\":\"卡比利亚之夜\",\"title_en\":null,\"year\":\"1957\",\"my_rating\":null,\"tmdb_rating\":7.965,\"added_at\":1788513120},{\"movie_id\":176628,\"rank\":5,\"title_main\":\"哀乐中年\",\"title_sub\":\"哀樂中年\",\"title_zh\":\"哀乐中年\",\"title_en\":null,\"year\":\"1949\",\"my_rating\":null,\"tmdb_rating\":8.4,\"added_at\":1788513143},{\"movie_id\":362178,\"rank\":6,\"title_main\":\"路边野餐\",\"title_sub\":\"路边野餐\",\"title_zh\":\"路边野餐\",\"title_en\":null,\"year\":\"2016\",\"my_rating\":null,\"tmdb_rating\":7.139,\"added_at\":1788513123},{\"movie_id\":430214,\"rank\":7,\"title_main\":\"春宵苦短，少女前进吧！\",\"title_sub\":\"夜は短し歩けよ乙女\",\"title_zh\":\"春宵苦短，少女前进吧！\",\"title_en\":null,\"year\":\"2017\",\"my_rating\":null,\"tmdb_rating\":7.441,\"added_at\":1788513125},{\"movie_id\":8392,\"rank\":8,\"title_main\":\"龙猫\",\"title_sub\":\"となりのトトロ\",\"title_zh\":\"龙猫\",\"title_en\":null,\"year\":\"1988\",\"my_rating\":null,\"tmdb_rating\":8.067,\"added_at\":1788513126},{\"movie_id\":78450,\"rank\":9,\"title_main\":\"恐怖份子\",\"title_sub\":\"恐怖份子\",\"title_zh\":\"恐怖份子\",\"title_en\":null,\"year\":\"1986\",\"my_rating\":100,\"tmdb_rating\":7.409,\"added_at\":1788513127},{\"movie_id\":12124,\"rank\":10,\"title_main\":\"旅行\",\"title_sub\":\"El viaje\",\"title_zh\":\"旅行\",\"title_en\":null,\"year\":\"1992\",\"my_rating\":100,\"tmdb_rating\":6.1,\"added_at\":1788513128}]}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_t2ExtQ6KOrdjiKEwbijm4657",
+      "content": "{\"results\":[{\"tmdb_id\":1018,\"title\":\"穆赫兰道\",\"original_title\":\"Mulholland Drive\",\"year\":\"2001\",\"overview\":\"深夜的穆赫兰道发生一桩车祸，女子丽塔在车祸中失了忆。她跌跌撞撞来到一个公寓里藏身。 一名男子说他常常梦见一个叫云奇的地方，那里有个恶魔盯着他。于是就来到云奇，果真见到墙后有怪物出现，男子当场晕死。另有一名杀手杀死了他面前的男人，然而蹩脚的他却惹来了不少一连串的麻烦。\",\"poster_path\":\"/lqNrliG6d98z9AbJywxdeWo3ngg.jpg\"}],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_JjkmRexojWy7jXtuwkqz7654",
+      "content": "{\"results\":[{\"tmdb_id\":1398,\"title\":\"潜行者\",\"original_title\":\"Сталкер\",\"year\":\"1979\",\"overview\":\"安德烈·塔可夫斯基在苏联时期的最后一部作品，是一次穿越神秘后末日景观的形而上学旅程，亦是一场独一无二的精妙观影体验。受雇的向导——“潜行者”——带领一位作家和一位教授深入“区”的核心地带，这个长期封闭的灾难禁区中，三人最终逼近了传说中的“房间”：一个据称能实现人内心深处最隐秘愿望的地方。改编自阿尔卡季与鲍里斯·斯特鲁加茨基兄弟的科幻小说，塔可夫斯基以丰富的物质细节和有机的氛围感，构建出一个沉浸式的世界。作为一则宗教寓言、对当时政治焦虑的反思，亦或是对电影本身的冥想——本片通过展开多重可能的意涵，将观众全然包围。[标准收藏]\",\"poster_path\":\"/fcGWnTnMtVIFitU12Sie7n9ADV5.jpg\"},{\"tmdb_id\":367198,\"title\":\"潜行者\",\"original_title\":\"潛龍狙擊\",\"year\":\"2019\",\"overview\":\"故事开始于卧底警察潜伏黑帮，意外的坐上了黑帮老大的位置，不料被大毒枭设计一步步拖入公海的魔鬼运输船；恰逢此时，一支神秘的第三方部队正在展开他们的复仇之路，命运的纠葛从此开始。在三方力量的角逐中，激烈的搏斗、刀战、枪战、狙击战、遥控炸弹，层层升级步步惊心。在法与情，爱与恨，兄弟和女人之间，有些事情总要有人去做。\",\"poster_path\":\"/c2e9rAQdgE0nB10y9BaLWSSDXGZ.jpg\"},{\"tmdb_id\":733837,\"title\":\"潜行者\",\"original_title\":\"The Stalker\",\"year\":\"2020\",\"overview\":\"\",\"poster_path\":\"/uinYhUFZCJdGd7T1LAnk71R0iYX.jpg\"},{\"tmdb_id\":138012,\"title\":\"血潜行者 Bloodstalkers\",\"original_title\":\"Blood Stalkers\",\"year\":\"1976\",\"overview\":\"\",\"poster_path\":\"/gMZJIq3RaXQI9CAdDIR19ISahCn.jpg\"},{\"tmdb_id\":766713,\"title\":\"无间行者之生死潜行\",\"original_title\":\"無間行者之生死潛行\",\"year\":\"2020\",\"overview\":\"香港黑幫「福和」成員丁卓飛（謝天華 飾）與反黑隊督察段一凡（周柏豪 飾）是雙方安插對方陣營的臥底。丁卓飛在「福和」做了十年臥底，為了掩飾真實身份，他比別人更加心狠手辣，亦因此漸漸接近核心。但親手拷問戰友，看著他們慘死，令丁卓飛開始厭倦這沒有盡頭的臥底工作……\",\"poster_path\":\"/ArMlYDn0E0wgxOyU3yAg5MsKLUR.jpg\"}],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_evUguJG18QiFeTIRDMmX6528",
+      "content": "{\"results\":[{\"tmdb_id\":491584,\"title\":\"燃烧\",\"original_title\":\"버닝\",\"year\":\"2018\",\"overview\":\"生活困顿的孤独内向者钟秀的人生，因闯入他世界的两人而变得复杂：先是邂逅灵动洒脱、带来情感可能的惠美，随后又遇见她旅行归来时带回的富有精致的青年本。当钟秀得知本的神秘癖好而惠美又突然失踪后，他开始陷入困惑与偏执，并走向令人震惊的结局。\",\"poster_path\":\"/nJhAPDiCu65OMsKc7rUUIp5OKR.jpg\"},{\"tmdb_id\":508138,\"title\":\"燃烧\",\"original_title\":\"Burn\",\"year\":\"2019\",\"overview\":\"岑勇康、希罗·费尔南德斯加盟惊悚新片《羽毛》(Plume)，乔什·哈切森、苏琪·沃特豪斯、蒂尔达·格哈姆-哈维主演，华裔Mike Gan自编自导。故事围绕一个孤独、情绪不稳定的加油站服务员Melinda(哈维)展开，她受够了被更自信、外向的同事Sheila(沃特豪斯)所掩盖，当一个急需现金、绝望的男人Billy(哈切森)持枪劫持加油站时，Melinda找到了一个机会和他建立联系，不管是否有人受伤。\\r 　　岑勇康饰演刘警官，道德良好、正直，受到Melinda的迷恋。费尔南德斯饰演Sheila男友Perry，被无意中卷进了她的危险游戏中。\\r 　　这是Mike Gan执导的首部长片，此前他执导的短片《No Evil》曾亮相多伦多电影节和棕榈泉电影节。\",\"poster_path\":\"/1wkq9N6OkNxO5d8C9umgrwa4dkb.jpg\"},{\"tmdb_id\":792614,\"title\":\"完全燃烧\",\"original_title\":\"Complètement Cramé !\",\"year\":\"2023\",\"overview\":\"英国企业家布雷克在妻子过世后，旧地重游法国一处庄园，想重温以往的回忆。没想到却被误认为是上门求职的退休老人，误打误撞地成为庄园管家。在这里，他遇见濒临破产却性格孤高的庄园女主人、手脚干练却嘴巴不饶人的女总管、暗恋女总管却不敢说出口的园丁，这里的每个人都隐藏着一个秘密，就连他们的猫也是！原本在商场叱咤风云的布雷克就这样过起任人使唤的日子，眼看饭碗不如想象中好端，安德鲁该如何重振庄园，并成功收服这座庄园的大大小小？\",\"poster_path\":\"/uZ8eIAAgJdlGbNWFqyU8QnaHgeU.jpg\"},{\"tmdb_id\":531428,\"title\":\"燃烧女子的肖像\",\"original_title\":\"Portrait de la jeune fille en feu\",\"year\":\"2019\",\"overview\":\"在十八世纪奢华浪漫的背景下，画家与她的模特之间，激情悄然酝酿，直至两人共同营造一个能容其短暂盛放的天地。本片出自当代法国影坛最受瞩目的作者导演之一——瑟琳·席安玛之手。玛丽安受秘密委派，来到一座与世隔绝的海边庄园，她必须通过暗中观察，为抗拒包办婚姻的埃洛伊兹画成一幅婚礼肖像。在精妙的张力中展开的，是一场持久目光的交汇。两位女性逐渐以醉人的亲密，熟知了彼此的举止、表情与身体，最终缔结了一段颠覆性的创作同盟，以及一场炽热的爱恋。怀抱着一种几乎超越时空的渴望，本片深掘了在一个没有男性的世界里，当女性可以自由共同生活、彼此凝视时，所迸发的情感与艺术可能。\",\"poster_path\":\"/rw2Xy7NJcJc21nRazjvzdXoii9T.jpg\"},{\"tmdb_id\":256196,\"title\":\"燃烧蓝\",\"original_title\":\"Burning Blue\",\"year\":\"2014\",\"overview\":\"90年代美国海军航母上，发生了两起看似孤立的坠机事故。五角大楼派遣专员来进行调查，不料却无意揭开了美国军队中一段隐秘的同性恋情。军队世家出身的丹尼尔（Trent Ford 饰）英俊稳重，与女友感情和睦，在军舰上享有较高声誉。新来的飞行员马修（Rob Mayes 饰）活泼好胜，丹尼尔对他敬而远之。然而一次偶然的结伴旅行，让两人的关系发生了微妙改变，尤其是同逛同志酒吧的经历，成为了他们彼此的秘密。由于调查专员的介入，事件性质开始变得严重，丹尼尔和队友都成为了政治打击的目标。 坠机事故再次发生了，这一次丹尼尔发现，他的人生再也不能回到从前那样...\",\"poster_path\":\"/uUpBD2EHyDpCLPATj8LFghiDCTy.jpg\"}],\"total_pages\":6,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_q6s8gZh4pifHhs3CJ78C2598",
+      "content": "{\"results\":[],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_hSKquRhBLefNQ32BdkFq6947",
+      "content": "{\"results\":[{\"tmdb_id\":207,\"title\":\"死亡诗社\",\"original_title\":\"Dead Poets Society\",\"year\":\"1989\",\"overview\":\"威尔顿预备学院以其沉稳凝重的教学风格和较高的升学率闻名，作为其毕业班的学生，理想就是升入名校。新学期文学老师约翰·基汀（罗宾·威廉姆斯 饰）的到来如同一阵春风，一反传统名校的严肃刻板...\",\"poster_path\":\"/qwE4GEH8dz7aQnNXjmM3MLKQwYN.jpg\"},{\"tmdb_id\":572166,\"title\":\"诗人\",\"original_title\":\"诗人\",\"year\":\"2021\",\"overview\":\"　　该片讲述了发生在上世纪末一段纠缠在岁月浪潮中的情爱故事。一心想当诗人，改变命运的李五，幸运地遇见连自己气味和影子都痴迷深爱的陈蕙，两人因爱而疯魔。一条毛裤，抵不过喧嚣现实地裹挟和撕扯，才华与情感凋零枯萎。爱亦成“毒”，有无解药？\",\"poster_path\":\"/qobfvwTUiI1H7mCFjnn7RQXRnLH.jpg\"},{\"tmdb_id\":47909,\"title\":\"诗\",\"original_title\":\"시\",\"year\":\"2010\",\"overview\":\"一位年过六旬的女性在发现一桩残忍的家庭罪行后，通过报名诗歌课程寻得了内心的力量与生命的意义。李沧东继备受赞誉的《密阳》后执导的这部作品，以精湛的笔触细腻描绘了一位坚韧老年女性如何在平凡生活中悄然获得精神觉醒，并坚守自我的道德指引。\",\"poster_path\":\"/19JINHaeAA6URhCnPLDkjhy8fEV.jpg\"},{\"tmdb_id\":1465563,\"title\":\"诗人\",\"original_title\":\"Un poeta\",\"year\":\"2025\",\"overview\":\"奥斯卡·雷斯特雷波对诗歌的痴迷并未给他带来任何荣耀。随着年岁的增长，他变得古怪而不安，逐渐沦为“隐居诗人”这一陈词滥调的象征。一次偶然的机会，他遇到了尤拉迪，一位出身卑微的少女，并帮助她发掘和培养自己的才华，这为他的生活带来了一丝光亮。然而，将她引入诗人的世界，或许并不是正确的选择。\",\"poster_path\":\"/3M8iVbbIMGIN3bmzNeranX2UCb2.jpg\"},{\"tmdb_id\":1511417,\"title\":\"巴霍巴利王：史诗\",\"original_title\":\"Bāhubali: The Epic\",\"year\":\"2025\",\"overview\":\"在壮丽的马希什马蒂王国，一段跨越两代的英雄史诗就此展开。自幼在瀑布下部落长大的青年希瓦，因某种神秘召唤爬上绝壁，意外发现自己竟是传奇君主阿玛兰德拉·巴霍巴利的遗孤。 通过老将卡塔帕的讲述，揭开了上一代因王位争夺而引发的阴谋——老巴霍巴利虽仁爱爱民，却惨遭至亲背叛与暗杀，王后德瓦塞娜也被囚禁多年。 得知真相的希瓦承袭父名，化身摩哂陀·巴霍巴利。他集结反抗力量，向暴君巴哈拉迪瓦发起最终决战，誓要夺回王权，洗刷家族耻辱。  这是一场关于勇气、背叛、牺牲与正义回归的终极较量。\",\"poster_path\":\"/oD1mFsD9TXf7ggghwpxZy9nlFfz.jpg\"}],\"total_pages\":11,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "你的口味我大致有数了——作者电影路线的重度影迷，爱去资料馆和北影节，最吃主竞赛式的大师手笔。你的满分片集中在《旅行》《恐怖份子》《穆赫兰道》，高分里《分手的决心》《无可奈何》《寂静的朋友》也全是作者向。我拉几个贴合的方向核对一下再给你推。",
+      "tool_calls": [
+        {
+          "id": "call_00_zucFekj3PPMCocDGEm0C3760",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"圣山\"}"
+          }
+        },
+        {
+          "id": "call_01_Rg44AqXLsjXoqzDupdW73126",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"妖夜慌踪\"}"
+          }
+        },
+        {
+          "id": "call_02_ykgIZs3VJTm1d1eZNWjh4739",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"内陆帝国\"}"
+          }
+        },
+        {
+          "id": "call_03_71BwX1jTJgTTzcfDbelQ3140",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"诗 2010\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_zucFekj3PPMCocDGEm0C3760",
+      "content": "{\"results\":[{\"tmdb_id\":8327,\"title\":\"圣山\",\"original_title\":\"La montaña sagrada\",\"year\":\"1973\",\"overview\":\"一位貌似耶稣的小偷（Horácio Salinas 饰）从儿童们的石块击打中醒来，与一个无手无脚的侏儒结伴进入城市。城中正进行一场疯狂的庆典，一些人被杀死，鸟雀从他们的枪口中飞出，大量蟾蜍穿着印第安人以及欧洲殖民者的服装在混战中被炸的粉碎。小偷从几个罗马士兵打扮的人手中接过十字架，又被他们将自身的形象制造成无数模型……小偷在众目睽睽下爬上了一座能生产黄金的高塔，塔内的术士从小偷的粪便中提炼出了金子。术士用占星术确认了几位门徒，他们是生产面具的商人、武器商、艺术家、玩具商、政府顾问、军队长官和建筑师，七人分别代表不同的行星。术士把这些掌控国家的人物积聚一起，抛弃一切之后向传说中的圣山进发寻找不朽的秘密。\",\"poster_path\":\"/pJcn7ChZBP1h6w97gprxg0h7lGQ.jpg\"},{\"tmdb_id\":835033,\"title\":\"圣山村谜局\",\"original_title\":\"圣山村谜局\",\"year\":\"2021\",\"overview\":\"电影是一部“藏族题材”悬疑影片，讲述了圣山村突发的一起命案，让原本平静的山村被惊悚笼罩，无论是悬崖下狂奔的尸体，恐慌的村民，坠亡的村霸，还是消失的村长，神色慌张的情侣…都让恐怖不断发酵，惊悚持续升级。影片逻辑缜密，全程烧脑，悬念十足！迷局真相让人心生惊骇！\",\"poster_path\":\"/2dwhQ9rrbhMj2L1GGulJeKWF262.jpg\"},{\"tmdb_id\":580281,\"title\":\"齐天大圣之火焰山\",\"original_title\":\"齐天大圣之火焰山\",\"year\":\"2019\",\"overview\":\"炎灵儿（罗米饰）原为太上老君八卦炉里的火灵，在孙悟空（陈浩民饰）大闹天宫时，为他的桀骜所吸引，后随八卦炉坠落火焰山，一直在此默默守候孙悟空的到来，可谓是“为爱守候千年”的典范了。\",\"poster_path\":\"/sYARLozfLWERG3ZA4tOL3B5cXwy.jpg\"},{\"tmdb_id\":60629,\"title\":\"烟山圣诞曲\",\"original_title\":\"A Smoky Mountain Christmas\",\"year\":\"1986\",\"overview\":\"\",\"poster_path\":\"/aSId7LLral6TWDuLTCryAigbXbS.jpg\"},{\"tmdb_id\":942828,\"title\":\"山上有棵圣诞树\",\"original_title\":\"山上有棵圣诞树\",\"year\":\"2012\",\"overview\":\"\",\"poster_path\":\"/2ZpynS7MuXiWc8NiBQc4O0lMjKT.jpg\"}],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_Rg44AqXLsjXoqzDupdW73126",
+      "content": "{\"results\":[{\"tmdb_id\":638,\"title\":\"妖夜慌踪\",\"original_title\":\"Lost Highway\",\"year\":\"1997\",\"overview\":\"这被认为是大卫•林奇拍得最混乱的一部电影。爵士乐手（比尔•普尔曼 Bill Pullman 饰）和他的妻子（帕特丽夏•阿奎特 Patricia Arquette 饰）一天早上收到了一盒录影带，他们发现里面的内容竟然是他们日常生活的点点滴滴。从此，他们每天早上都会收到这样的录影带。这天，乐手发现录影带里的内容竟然是他杀死了妻子！当他冲进卧室时，发现妻子果然死在了床上。警察将他带走了。一晚过后，原本在监房里坐着的乐手变成一个年轻的维修工，莫明其妙的警察只好将他放了。维修工因一手出色的修车技术深得黑社会老大器重，这时，他发现老大的女人竟然和他的妻子长得一摸一样，只是头发颜色不一样。老大的女人主动勾引了维修工，两人携款潜逃。当他们来到荒漠公路时，维修工与女子疯狂做爱，之后他又变回了乐手……\",\"poster_path\":\"/lQpyVXfPuEPNqKa9odc4OKsUMhT.jpg\"}],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_ykgIZs3VJTm1d1eZNWjh4739",
+      "content": "{\"results\":[{\"tmdb_id\":1730,\"title\":\"内陆帝国\",\"original_title\":\"Inland Empire\",\"year\":\"2006\",\"overview\":\"Nikki Grace(劳拉·邓恩饰)和Devon Berk(加斯丁·特奥克斯)在Kingsley Stewart(杰里米·艾恩斯饰)的新片中担任主角，所拍摄的电影片名是《On High in blue tomorrows》。Nikki过于投入到戏中的角色，导致她的生活乱得一团糟。渐渐地，她开始混淆现实生活与她所扮演的人物(Susan Blue)与男主角Devon(在影片中的角色名字是Billy Side)。电影《On High in blue tomorrows》所要讲述的故事是发生在从前的，结果因为两位主角的意外身亡而使得拍片计划半途而废。但是，对于Nikki来说却是越来越混乱。在现实生活中，她的角色(Susan Blue)变得越来越真实，甚至比她自己还要真实……\",\"poster_path\":\"/6UBpa9SyYh2JNAuJkPSTG2wuEiw.jpg\"}],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_71BwX1jTJgTTzcfDbelQ3140",
+      "content": "{\"results\":[],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "你的观影画像很清晰，我据此推荐。你今年几乎全是作者片：资料馆+北影节系，最爱超现实/梦呓（《旅行》《穆赫兰道》《恐怖份子》都打了满分），也吃亚洲惊悚（《分手的决心》90）和诗性动画（《我在伊朗长大》）。结合这些口味，我挑了这些方向——\n\n**林奇系（你的《穆赫兰道》满分，可追）**\n- **妖夜慌踪**（1997）— 林奇最混沌、梦境逻辑最激进的一部，爵士乐手+录影带杀人，身份不断崩解。比《穆赫兰道》更aggressive的梦。\n- **内陆帝国**（2006）— 林奇最私密也最\"迷宫\"的长片，女演员戏中戏失控，现实与角色互为倒影。适合你已经能接受林奇语汇的状态。\n\n**李沧东系（亚洲惊悚/诗性，补上你的缺口）**\n- **燃烧**（2018）— 惊悚+心理，钟秀、惠美、本三人的角力，表面写实实则悬置，跟你9部Thriller和《分手的决心》的口味严丝合缝。\n- **诗**（2010）— 李沧东，老人学写诗对抗一桩罪行，诗性与道德并重。你给《旅行》打满分的作者笔触，这部是同一个谱系。\n\n**超现实/魔幻现实（你《旅行》《原始星球》的源头）**\n- **潜行者**（1979，塔可夫斯基）— 长镜头+形而上朝圣，\"区\"深处的房间照见人心渴望。冷静、诗性、宗教寓言，节奏慢但极对你胃口。\n- **圣山**（1973，佐杜洛夫斯基）— 魔幻寓言，七个行星门徒进圣山求不朽，超现实画面轰炸。跟《旅行》的魔幻南美同气质，但更癫。\n\n**情感细腻/女性作者（你《两生花》80分）**\n- **燃烧女子的肖像**（2019，瑟琳·席安玛）— 两个女性在画与被画间凝视、升温，海边的反叛与依恋。情绪张力强，适合你看《两生花》时那种细腻偏好。\n\n要不要我把其中几部加进你的「想看」清单？或者你只想锁定某几个方向，我再往深里挖。",
+      "usage": {
+        "prompt": 34411,
+        "completion": 5922,
+        "hit": 23552,
+        "miss": 10859
+      },
+      "cost": {
+        "value": 0.08823020000000001,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "把这些电影加到 watchlist 里面"
+    },
+    {
+      "role": "assistant",
+      "content": "好的，我把推荐的这 7 部都加进你的「想看」清单。",
+      "tool_calls": [
+        {
+          "id": "call_00_7mwyn0aEZELpcFX1p3tr1105",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 638, \"in_watchlist\": true}"
+          }
+        },
+        {
+          "id": "call_01_r3Sq7gcGdE2sh4bj0VWH6020",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 1730, \"in_watchlist\": true}"
+          }
+        },
+        {
+          "id": "call_02_VPWGSIp5MwPlcL2rktv54830",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 491584, \"in_watchlist\": true}"
+          }
+        },
+        {
+          "id": "call_03_k2iWdFg1udRSuK08t8ZH6017",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 47909, \"in_watchlist\": true}"
+          }
+        },
+        {
+          "id": "call_04_tgLUeI3BO4oPSxrftpYa0719",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 1398, \"in_watchlist\": true}"
+          }
+        },
+        {
+          "id": "call_05_xfcVC09ppN5EIXTnacyz3858",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 8327, \"in_watchlist\": true}"
+          }
+        },
+        {
+          "id": "call_06_sHfrAiDyj86oZvP1CihJ2751",
+          "type": "function",
+          "function": {
+            "name": "set_movie_state",
+            "arguments": "{\"movie_id\": 531428, \"in_watchlist\": true}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_7mwyn0aEZELpcFX1p3tr1105",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_01_r3Sq7gcGdE2sh4bj0VWH6020",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_02_VPWGSIp5MwPlcL2rktv54830",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_03_k2iWdFg1udRSuK08t8ZH6017",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04_tgLUeI3BO4oPSxrftpYa0719",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_05_xfcVC09ppN5EIXTnacyz3858",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_06_sHfrAiDyj86oZvP1CihJ2751",
+      "content": "{\"ok\":true}"
+    },
+    {
+      "role": "assistant",
+      "content": "都加好了✅ 7 部全部进了你的「想看」清单：\n\n- 妖夜慌踪（1997）\n- 内陆帝国（2006）\n- 燃烧（2018）\n- 诗（2010）\n- 潜行者（1979）\n- 圣山（1973）\n- 燃烧女子的肖像（2019）\n\n需要我给你重新看看清单一并核对一下，或者想让我调整、补充几部吗？",
+      "usage": {
+        "prompt": 26115,
+        "completion": 1197,
+        "hit": 24960,
+        "miss": 1155
+      },
+      "cost": {
+        "value": 0.016734,
+        "currency": "CNY"
+      }
+    }
+  ]
+}

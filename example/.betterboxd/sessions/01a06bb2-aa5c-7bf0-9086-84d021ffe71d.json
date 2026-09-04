@@ -1,0 +1,118 @@
+{
+  "id": "01a06bb2-aa5c-7bf0-9086-84d021ffe71d",
+  "scope": "global",
+  "movie_id": null,
+  "entry_id": null,
+  "review_id": null,
+  "title": "示例：创建 Review, Diary",
+  "created_at": 1788513266,
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "你好，我是 Betterboxd，你的观影数据助手。我能帮你记录和查询看过的电影、统计年度与类型偏好、聊聊最近看的片，或者打理你的片单和推荐。想从哪开始？比如「记一笔新看的电影」「统计今年偏好」或「聊聊我最近看的片」。",
+      "usage": {
+        "prompt": 535,
+        "completion": 97,
+        "hit": 512,
+        "miss": 23
+      },
+      "cost": {
+        "value": 0.0009932,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "添加 Review 你的名字 2016：\n电影的前半段由于交换身体的设定而富有趣味，也使得两人相识相知的过程别具一格。而两处叙述性诡计与接二连三的富有张力的情节搭配上恰到好处的配乐，使得电影的后半段可以称得上是高潮迭起。电影描绘了一种奋不顾身、双向奔赴的理想化的爱情，而同时自然地融入了日本传统文化与对当下小镇发展前景的思考，并使得电影奇幻的设定更为自然踏实而不显得虚浮。作为画龙点睛的一笔，电影的结尾同时有着 Happy Ending 的美好与 Bad Ending 的冲击力，令人回味无穷。相遇、相识、分离、重逢，爱情电影常见套路的每一个环节在这部电影中都富有新意，带来了新海诚本人都难以复制的感动。"
+    },
+    {
+      "role": "assistant",
+      "content": "我来先确认影片信息。",
+      "tool_calls": [
+        {
+          "id": "call_00_EJATUGbk1QZYKOKji0Rb0174",
+          "type": "function",
+          "function": {
+            "name": "search_movies",
+            "arguments": "{\"query\": \"你的名字\", \"year\": 2016}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_EJATUGbk1QZYKOKji0Rb0174",
+      "content": "{\"results\":[{\"tmdb_id\":372058,\"title\":\"你的名字。\",\"original_title\":\"君の名は。\",\"year\":\"2016\",\"overview\":\"生活在深山小镇的高中女生宫水三叶一直向往着东京的生活，而住在东京的高中男生立花泷也过着属于自己的忙碌日常。某天，两人开始在梦中交换身体，以彼此的身份体验完全不同的人生。最初的困惑与争执过后，他们逐渐学会通过留言了解对方，并在一次次交换中建立起特殊的羁绊。然而就在两人越来越在意彼此时，身体交换却突然停止。为了找到那个从未真正见过、却早已深深影响自己的人，泷开始循着记忆中的线索寻找三叶，而隐藏在这场奇妙相遇背后的秘密也逐渐浮出水面……\",\"poster_path\":\"/vRQ7wpxpHt2aV8RnOkwHlOQAMKe.jpg\"},{\"tmdb_id\":414085,\"title\":\"的士，你叫什么名字\",\"original_title\":\"Taxi, em tên gì?\",\"year\":\"2016\",\"overview\":\"　　一位心不在焉的科学家在错过航班后必须搭计程车去求婚，但一个严厉的司机让他偏离了轨道。\",\"poster_path\":\"/oh1dt0ww3ZsW2zPrYxvTocAMjvz.jpg\"}],\"total_pages\":1,\"note\":\"已缓存候选；写记录会自动选中\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "确认影片为《你的名字。》(2016，新海诚，TMDB 372058)。我来添加这篇影评。",
+      "tool_calls": [
+        {
+          "id": "call_00_oymChdZrufTdAs2E6Zb69834",
+          "type": "function",
+          "function": {
+            "name": "manage_reviews",
+            "arguments": "{\"action\": \"add\", \"movie_id\": 372058, \"title\": \"你的名字\", \"body_md\": \"电影的前半段由于交换身体的设定而富有趣味，也使得两人相识相知的过程别具一格。而两处叙述性诡计与接二连三的富有张力的情节搭配上恰到好处的配乐，使得电影的后半段可以称得上是高潮迭起。电影描绘了一种奋不顾身、双向奔赴的理想化的爱情，而同时自然地融入了日本传统文化与对当下小镇发展前景的思考，并使得电影奇幻的设定更为自然踏实而不显得虚浮。作为画龙点睛的一笔，电影的结尾同时有着 Happy Ending 的美好与 Bad Ending 的冲击力，令人回味无穷。相遇、相识、分离、重逢，爱情电影常见套路的每一个环节在这部电影中都富有新意，带来了新海诚本人都难以复制的感动。\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_oymChdZrufTdAs2E6Zb69834",
+      "content": "{\"ok\":true,\"review_id\":\"01a06bb3-0e4a-7033-ac38-bfe52cee0b7e\",\"watchlist_cleared\":false}"
+    },
+    {
+      "role": "assistant",
+      "content": "已保存影评《你的名字》(2016)。🟡\n\n你提到这段文字很抓人，尤其对「新海诚本人都难以复制的感动」这个判断很有力量。要不要顺手给它打个分（0-100），或者标记为「喜欢」？另外我注意到系统里之前似乎没有这部片的相关记录，需要的话我可以再建立一条对应的观影记录。",
+      "usage": {
+        "prompt": 14273,
+        "completion": 739,
+        "hit": 10368,
+        "miss": 3905
+      },
+      "cost": {
+        "value": 0.0194028,
+        "currency": "CNY"
+      }
+    },
+    {
+      "role": "user",
+      "content": "创建观影记录，2024 年 8 月 5 日"
+    },
+    {
+      "role": "assistant",
+      "content": "我来为《你的名字。》(2016) 创建 2024-08-05 的观影记录。",
+      "tool_calls": [
+        {
+          "id": "call_00_cW8aqD6zoIbZkEOaZUHc8514",
+          "type": "function",
+          "function": {
+            "name": "manage_diary",
+            "arguments": "{\"action\": \"add\", \"movie_id\": 372058, \"watched_date\": \"2024-08-05\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_00_cW8aqD6zoIbZkEOaZUHc8514",
+      "content": "{\"ok\":true,\"entry_id\":\"01a06bb3-8c72-7ff0-bce3-1b23d51c6ceb\",\"notes\":[]}"
+    },
+    {
+      "role": "assistant",
+      "content": "已创建《你的名字。》(2016) 的观影记录，观看日期 2024-08-05。✅\n\n需要的话我还可以补上评分、打标签、标注地点/同伴等。要继续吗？",
+      "usage": {
+        "prompt": 10581,
+        "completion": 353,
+        "hit": 6400,
+        "miss": 4181
+      },
+      "cost": {
+        "value": 0.01636,
+        "currency": "CNY"
+      }
+    }
+  ]
+}
