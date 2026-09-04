@@ -1,0 +1,127 @@
+# Betterboxd — AI 影迷助手
+
+面向中文影迷的个人观影数据助手：**对话即记录**——对 AI 说「记一下刚看了 XXX，X 分」，自动落库；统计不预置项目，由 AI 现场写 SQL 在只读视图上执行；写操作全部经**可编辑确认卡**后才落库。Rust (axum + rusqlite + 手写 Agent Loop) + React18 + TS + Vite + Tailwind v4。
+
+> 默认只监听 `127.0.0.1:3000`，随记等私密数据全部本地保存。
+
+---
+
+## 一、环境要求
+
+| 工具 | 版本 | 说明 |
+|---|---|---|
+| Rust | ≥ 1.85（edition 2024） | `rustc --version` 确认 |
+| Node.js | ≥ 18（建议 LTS） | 构建前端用；`npm install && npm run build` |
+| npm | ≥ 9 | |
+| C 编译器 | 任选其一 | rusqlite 使用 `bundled` 特性（自带 SQLite 源码编译）——Windows 需 [MSVC Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 或 MinGW；macOS 直接使用系统 Xcode Command Line Tools；Linux 一般自带 |
+
+**跨平台**：Windows / macOS / Linux（含 WSL2）均可编译运行。没有平台专属代码；整个仓库可编译为原生二进制。运行约束见「四、运行」。
+
+---
+
+## 二、目录结构
+
+```
+betterboxd/
+├── crates/core/          # 全部业务逻辑（工具层、Agent Loop、SQLite、迁移、TMDB 客户端）
+├── apps/server/          # axum 服务器（REST + WebSocket + 静态托管），单二进制
+├── apps/web/             # React18 + Vite + Tailwind v4 前端（构建产物由 server 托管）
+├── spikes/               # 开发脚本与示例环境变量（local.env.example）
+├── data/                 # 默认数据目录（data/.betterboxd/ 内含 config.toml、data.db、sessions、posters）
+│                          # 已在 .gitignore 中，不会入库
+└── documents/            # 设计文档 / 技术报告 / 迭代记录（交付物）
+```
+
+---
+
+## 三、构建
+
+```bash
+# 0)（可选）首次从零配置：复制并填写密钥（也可跳过，到设置页里填）
+cp spikes/local.env.example spikes/local.env
+#    编辑 spikes/local.env：TMDB_KEY、COURSE_ENDPOINT/COURSE_KEY/COURSE_MODEL
+
+# 1) 前端
+cd apps/web
+npm install
+npm run build              # 产物 apps/web/dist
+cd ../..
+
+# 2) Rust（workspace 根目录）
+cargo build                # 产物 target/debug/betterboxd-server
+```
+
+> 前端只需构建一次；后端改动后重新 `cargo build` 并**重启进程**（`cargo check` ≠ `cargo build`）。
+
+---
+
+## 四、运行
+
+**必须在 `betterboxd/`（workspace 根目录）启动**——静态资源 `apps/web/dist` 与默认数据目录 `data` 按当前工作目录相对解析。
+
+```bash
+cd betterboxd
+./target/debug/betterboxd-server        # 或 cargo run -p betterboxd-server
+# 浏览器打开 http://localhost:3000
+```
+
+启动参数（可选）：
+- `--data-dir <目录>` / 环境变量 `BB_DATA`：指定数据目录（默认 `data/`，即 `data/.betterboxd/`）
+- 存档功能会通过内部重启机制自动携带该参数（见「七、存档」）
+
+**端口占用**：默认 `127.0.0.1:3000`，被占用时进程启动会重试约 6 秒后退出；先释放端口再启动。
+
+---
+
+## 五、第一次使用（3 步）
+
+1. **选择存档**：启动网页进入「选择一个存档开始」——可新建（选父目录 + 存档名）、载入已有目录，或直接进入当前。
+2. **配置 AI**：设置页 →「+ 添加配置」→ 填 Endpoint / API Key / Model（价格与预算可选填，每 1M token 计价；**首次保存自动启用**）→「保存」。TMDB API Key 单独一行配置同页下方。
+3. **开始对话**：Chats 页「+ 新建」→ 对 AI 说「记一下：看了《花样年华》，95 分」→ 确认卡确认 → 入库。
+
+**想先看效果**：运行内置演示数据播种：
+
+```bash
+cargo run -p betterboxd-core --bin seed_demo
+```
+
+（会插入 15 部影片 + 半年观影史到当前数据目录，需要 TMDB Key 可用。）
+
+### 什么是「存档」？
+
+一个存档 = 一个包含 `data.db / config.toml / sessions / posters` 的自包含目录（`.betterboxd/` 结构）。存档之间完全隔离（独立数据与配置），可随时新建、载入、切换、删除。存档列表保存在用户级 `~/.config/betterboxd/archives.json`（Windows 下为 `%USERPROFILE%\.config\betterboxd\`），切换存档会重启服务进程（几秒）。
+
+---
+
+## 六、常用操作
+
+| 功能 | 入口 |
+|---|---|
+| 记录观影 / 写影评 / 管理想看与喜欢 | 对 AI 说，经确认卡；或 Chats / Diary / Reviews / Films 页面表单 |
+| 统计（类型/年份/导演/同伴…任意维度） | 对 AI 说「统计…」；AI 现场写 SQL（只读视图 + 1000 行上限），也可保存为常用统计 |
+| 讨论影片 / 一条记录 / 一篇影评 | 详情页、Diary 条目、Review 卡片上的 💬 按钮 |
+| 清单（List） | Lists 页；支持排名拖拽、字母来源（Letterboxd）导入预留 |
+| 会话导出 / 导入 | Chats 页顶部 ⬆ 导入 / ⬇ 导出（本项目 JSON 格式） |
+| 用量与预算 | 设置页每配置卡片：总用量（历史）/ 缓存用量（预算判断，可 Reset） |
+| AI 对话计费 | 每次回复下方灰色小字显示 token 消耗与花费 |
+
+**隐私说明**：所有随记/评分/会话均存在本地数据目录；服务只监听本机回环。AI 仅获得经工具查询的数据，不会上传你的库文件。
+
+---
+
+## 七、测试
+
+```bash
+cargo test -p betterboxd-core      # 核心逻辑 23 个测试
+npm run build                      # 前端类型检查 + 构建
+```
+
+---
+
+## 八、常见问题
+
+- **保存 AI 配置后还报「未配置 AI」**？新存档默认无配置——打开「设置」添加；确认 `active_profile` 已切换（卡片显示「✓ 当前」）。
+- **影片搜索无结果**？检查 TMDB API Key 与代理（设置页 TMDB 一行，保存即生效）。
+- **从其他目录启动 404**？必须在 `betterboxd/` 目录运行（静态资源相对路径）。
+- **切换存档后网页一直转圈**？重启需要几秒，30 秒后自动提示可刷新。
+- **WSL2（Windows 下）**：编译出的是 Linux 二进制，请在 WSL 内运行；选择 Windows 侧文件夹时使用 `/mnt/c/...` 路径（对应 `C:\...`）。
