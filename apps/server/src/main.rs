@@ -76,6 +76,7 @@ fn ensure_config(lib_dir: &std::path::Path) -> Config {
     if cfg_path.exists() {
         return Config::load(&cfg_path).expect("config.toml 解析失败");
     }
+    // （spikes/local.env 引导已移除：2026-09-04 用户裁定删除 spikes；新环境统一空配置走设置页引导）
     let mut kv = std::collections::HashMap::new();
     let env_file = std::path::Path::new("spikes/local.env");
     if let Ok(raw) = std::fs::read_to_string(env_file) {
@@ -94,23 +95,32 @@ fn ensure_config(lib_dir: &std::path::Path) -> Config {
             }
         }
     }
+    let has_env = !kv.is_empty();
+    let (profiles, active_profile) = if has_env {
+        (
+            vec![betterboxd_core::config::Profile {
+                name: "课程平台".into(),
+                endpoint: kv.get("COURSE_ENDPOINT").cloned().unwrap_or_default(),
+                api_key: kv.get("COURSE_KEY").cloned().unwrap_or_default(),
+                model: kv.get("COURSE_MODEL").cloned().unwrap_or_default(),
+                context_length: 8192,
+                thinking_mode: "off".into(),
+                temperature: None,
+                top_p: None,
+                max_output_tokens: None,
+                extra_body_json: None,
+                pricing: betterboxd_core::config::Pricing::default(),
+                currency: "CNY".into(),
+                budget: None,
+            }],
+            Some("课程平台".into()),
+        )
+    } else {
+        (vec![], None)
+    };
     let cfg = Config {
-        profiles: vec![betterboxd_core::config::Profile {
-            name: "课程平台".into(),
-            endpoint: kv.get("COURSE_ENDPOINT").cloned().unwrap_or_default(),
-            api_key: kv.get("COURSE_KEY").cloned().unwrap_or_default(),
-            model: kv.get("COURSE_MODEL").cloned().unwrap_or_default(),
-            context_length: 8192,
-            thinking_mode: "off".into(),
-            temperature: None,
-            top_p: None,
-            max_output_tokens: None,
-            extra_body_json: None,
-            pricing: betterboxd_core::config::Pricing::default(),
-            currency: "CNY".into(),
-            budget: None,
-        }],
-        active_profile: Some("课程平台".into()),
+        profiles,
+        active_profile,
         tmdb: betterboxd_core::config::TmdbCfg {
             key: kv.get("TMDB_KEY").cloned().unwrap_or_default(),
             proxy: None,

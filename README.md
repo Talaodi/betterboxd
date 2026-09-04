@@ -2,11 +2,7 @@
 
 面向中文影迷的个人观影数据助手：**对话即记录**——对 AI 说「记一下刚看了 XXX，X 分」，自动落库；统计不预置项目，由 AI 现场写 SQL 在只读视图上执行；写操作全部经**可编辑确认卡**后才落库。Rust (axum + rusqlite + 手写 Agent Loop) + React18 + TS + Vite + Tailwind v4。
 
-> 默认只监听 `127.0.0.1:3000`，随记等私密数据全部本地保存。
-
----
-
-## 一、环境要求
+## 环境要求
 
 | 工具 | 版本 | 说明 |
 |---|---|---|
@@ -17,30 +13,9 @@
 
 **跨平台**：Windows / macOS / Linux（含 WSL2）均可编译运行。没有平台专属代码；整个仓库可编译为原生二进制。运行约束见「四、运行」。
 
----
-
-## 二、目录结构
-
-```
-betterboxd/
-├── crates/core/          # 全部业务逻辑（工具层、Agent Loop、SQLite、迁移、TMDB 客户端）
-├── apps/server/          # axum 服务器（REST + WebSocket + 静态托管），单二进制
-├── apps/web/             # React18 + Vite + Tailwind v4 前端（构建产物由 server 托管）
-├── spikes/               # 开发脚本与示例环境变量（local.env.example）
-├── data/                 # 默认数据目录（data/.betterboxd/ 内含 config.toml、data.db、sessions、posters）
-│                          # 已在 .gitignore 中，不会入库
-└── documents/            # 设计文档 / 技术报告 / 迭代记录（交付物）
-```
-
----
-
-## 三、构建
+## 构建
 
 ```bash
-# 0)（可选）首次从零配置：复制并填写密钥（也可跳过，到设置页里填）
-cp spikes/local.env.example spikes/local.env
-#    编辑 spikes/local.env：TMDB_KEY、COURSE_ENDPOINT/COURSE_KEY/COURSE_MODEL
-
 # 1) 前端
 cd apps/web
 npm install
@@ -79,13 +54,13 @@ cd betterboxd
 2. **配置 AI**：设置页 →「+ 添加配置」→ 填 Endpoint / API Key / Model（价格与预算可选填，每 1M token 计价；**首次保存自动启用**）→「保存」。TMDB API Key 单独一行配置同页下方。
 3. **开始对话**：Chats 页「+ 新建」→ 对 AI 说「记一下：看了《花样年华》，95 分」→ 确认卡确认 → 入库。
 
-**想先看效果**：运行内置演示数据播种：
+**想先看效果**：先在设置页配置好 TMDB API Key（保存后 config.toml 入库），然后运行内置演示数据播种：
 
 ```bash
 cargo run -p betterboxd-core --bin seed_demo
 ```
 
-（会插入 15 部影片 + 半年观影史到当前数据目录，需要 TMDB Key 可用。）
+会插入 15 部影片 + 半年观影史到当前数据目录。
 
 ### 什么是「存档」？
 
