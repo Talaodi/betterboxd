@@ -191,7 +191,59 @@ AI 写统计的约定 (prompt 里写明): 计数 / 均值 / 排序这些能用 S
 
 ---
 
-## 11. 一些细节与约定
+## 12. 手动修改配置文件
+
+除了设置页, 你也可以直接编辑存档目录下的 `config.toml` (位置: `<存档目录>/.betterboxd/config.toml`). 设置页能改的东西它都能改, 还有几样只有这里能改 (全局限额, 显示偏好等). 适合批量修改, 或在不方便开界面的时候调.
+
+### 字段说明
+
+```toml
+active_profile = "deepseek"          # 当前生效的配置名 (必须与某个 [[profiles]] 的 name 相同)
+
+[[profiles]]                         # 一个模型配置
+name = "deepseek"                    # 配置名, 供切换识别
+endpoint = "https://api.deepseek.com"# API 地址, 写到 /v1 为止
+api_key = "sk-..."                   # 你的密钥, 保存后才生效
+model = "deepseek-v4-flash"
+context_length = 1000000             # 上下文窗口上限
+thinking_mode = "off"                # off / on / advanced
+temperature = 0.7                    # 选填
+top_p = 1.0                          # 选填
+max_output_tokens = 4096             # 选填
+currency = "CNY"                     # 计价与预算货币
+budget = 1.0                         # 用量上限 (钱), 按"缓存用量"判断; 不填不限制
+
+[profiles.pricing]                   # 每 1M token 的单价
+input_cached = 0.1
+input_uncached = 3.0
+output_cached = 0.0                  # 缓存命中的输出极少见, 保持 0
+output_uncached = 9.0
+
+[tmdb]
+key = "..."                          # TMDB API Key
+proxy = ""                           # 选填, 代理地址
+language = "zh-CN"
+
+[billing]                            # 全局限额 (仅这里可改)
+display_currency = "CNY"
+budget_monthly = 50.0                # 选填, 全局月度预算
+budget_total = 200.0                 # 选填, 全局累计预算
+
+[billing.fx_rates]                   # 计价换算: 币种 = 每 1 单位兑人民币的汇率
+# USD = 7.2
+
+[display]                            # 标题显示偏好 (仅这里可改)
+title_main = "zh"                    # zh / en / original / hide
+title_sub = "original"
+```
+
+### 与其他入口的关系
+
+- 设置页保存的是**整份 config.toml**, 会覆盖你手改的内容 (最后写入者胜). 建议: 大改用手动编辑, 小改用设置页.
+- **生效时机**: 启动时读取 + 设置页保存时热更新. 手动改完必须**重启服务进程**才会生效; 不重启等于没改.
+- **API Key 的明文提醒**: 这个文件以明文保存你的密钥, 但它是本机私有文件, 不要外发, 也不要误提交到任何代码仓库 (项目里已经有 `.gitignore` 保护正常数据目录).
+- 改坏了 (TOML 语法错误), 启动会直接失败并在日志打印解析错误; 把改的内容撤销或修正即可, 不会动到 data.db.
+
 
 - 输入框: 回车发送, 输入期间 AI 回复时不可发送, 点橙色 "停止" 可中断当前生成本地留档. 
 - Markdown: 聊天 / 随记 / 影评都渲染. 
