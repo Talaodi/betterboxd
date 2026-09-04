@@ -40,6 +40,8 @@ struct AppState {
     profile_model: Arc<Mutex<String>>,
     pending: Arc<Mutex<std::collections::HashMap<String, PendingRoute>>>,
     posters_dir: std::path::PathBuf,
+    /// 当前数据目录（存档界面显示）
+    data_dir: std::path::PathBuf,
 }
 
 /// 确认卡等待路由：call_id → 回传通道（+原始请求参数，供前端缺参时回退）。
@@ -104,6 +106,9 @@ fn ensure_config(lib_dir: &std::path::Path) -> Config {
             top_p: None,
             max_output_tokens: None,
             extra_body_json: None,
+            pricing: betterboxd_core::config::Pricing::default(),
+            currency: "CNY".into(),
+            budget: None,
         }],
         active_profile: Some("课程平台".into()),
         tmdb: betterboxd_core::config::TmdbCfg {
@@ -937,6 +942,55 @@ fn llm_to_ui_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> 
     ui
 }
 
+/// 会话导出（本项目 JSON 格式）：id/scope/movie_id/entry_id/review_id/title/created_at/messages。
+async fn chat_export(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return (StatusCode::BAD_REQUEST, "非法会话 ID").into_response();
+    }
+    match app.sessions.load(&id) {
+        Some(s) => Json(json!({
+            "id": s.id, "scope": s.scope, "movie_id": s.movie_id,
+            "entry_id": s.entry_id, "review_id": s.review_id,
+            "title": s.title, "created_at": s.created_at, "messages": s.messages,
+        }))
+        .into_response(),
+        None => (StatusCode::NOT_FOUND, "会话不存在").into_response(),
+    }
+}
+
+/// 会话导入（本项目格式）：id 冲突（已存在/JSON 非法）则生成新 id；标题/消息保留。
+async fn chat_import(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let mut v = args;
+    let mut id = v["id"].as_str().unwrap_or("").to_string();
+    if id.is_empty()
+        || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        || app.sessions.load(&id).is_some()
+    {
+        id = uuid::Uuid::now_v7().to_string();
+        v["id"] = json!(id);
+    }
+    if !v["messages"].is_array() {
+        v["messages"] = json!([]);
+    }
+    if v["title"].as_str().unwrap_or("").is_empty() {
+        v["title"] = json!("导入会话");
+    }
+    let s = betterboxd_core::session::ChatSession {
+        id: v["id"].as_str().unwrap_or("").to_string(),
+        scope: v["scope"].as_str().unwrap_or("global").to_string(),
+        movie_id: v["movie_id"].as_i64(),
+        entry_id: v["entry_id"].as_str().map(String::from),
+        review_id: v["review_id"].as_str().map(String::from),
+        title: v["title"].as_str().unwrap_or("").to_string(),
+        created_at: v["created_at"].as_i64().unwrap_or_else(betterboxd_core::now),
+        messages: serde_json::from_value(v["messages"].clone()).unwrap_or_default(),
+    };
+    match app.sessions.save(&s).await {
+        Ok(_) => Json(json!({"ok": true, "session_id": s.id})).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("导入失败: {e}")).into_response(),
+    }
+}
+
 /// 单个会话的历史消息（前端恢复/查看用）。
 async fn chat_detail(State(app): State<App>, AxPath(id): AxPath<String>) -> Response {
     // 会话 id 为 uuid，仅允许安全字符
@@ -1205,9 +1259,39 @@ async fn handle_chat(
 
     // —— P4 补充1：新 movie 系会话 → 服务端主动开场白（流式，落为第一条 assistant 消息）——
     // 注入上下文（条目/影评/影片 + 画像）在 opening system 里复述给用户，用户可直接看到 AI 读到了什么。
-    let opening_handle = if is_fresh_session && session_movie_id.is_some() {
+    let opening_handle = if is_fresh_session {
         let client = app.client.read().unwrap().clone();
-        if client.is_some() {
+        // 开场白也为 LLM 调用：预算（缓存用量）拦截前置，超限直接提示（不跑生成）
+        let budget_ok = {
+            let cfg = app.config.lock().unwrap().clone();
+            match cfg.active() {
+                Ok(p) => {
+                    let cost: f64 = app
+                        .db
+                        .select_json_params(
+                            "SELECT cost FROM profile_usage WHERE profile_name=?1".into(),
+                            vec![betterboxd_core::db::SqlVal::Text(p.name.clone())],
+                        )
+                        .await
+                        .unwrap_or_default()
+                        .first()
+                        .and_then(|r| r["cost"].as_f64())
+                        .unwrap_or(0.0);
+                    betterboxd_core::agent::check_profile_budget(p.budget, cost)
+                }
+                Err(_) => Ok(()),
+            }
+        };
+        if let Err(e) = budget_ok {
+            let _ = tx.send(Message::Text(
+                serde_json::json!({"type": "done", "interrupted": true,
+                    "steps": 1, "tokens": {"prompt": 0, "completion": 0},
+                    "aborted": Some(e)})
+                .to_string()
+                .into(),
+            ));
+            None
+        } else if client.is_some() {
             let tx_o = tx.clone();
             let sessions = app.sessions.clone();
             let db = app.db.clone();
@@ -1233,38 +1317,25 @@ async fn handle_chat(
                 )
                 .await;
                 match run {
-                    Ok((text, (pt, ct))) => {
+                    Ok((text, (pt, ct, hit, miss))) => {
                         cur.messages
                             .push(serde_json::json!({"role": "assistant", "content": text}));
                         if cur.title.is_empty() {
                             cur.title = "开场讨论".to_string();
                         }
                         let _ = sessions.save(&cur).await;
-                        // 开场白同样计 usage：对齐正常路径的 7 参数（pname/pmodel 非空串）
-                        let sid = cur.id.clone();
-                        let db2 = db.clone();
-                        let (op_pname, op_pmodel) = (pname.clone(), pmodel.clone());
-                        let _ = db2
-                            .call(move |c| {
-                                c.execute(
-                                    "INSERT INTO usage_records (id, session_id, profile_name,
-                                   model, prompt_tokens, completion_tokens, at, kind)
-                                 VALUES (?1,?2,?3,?4,?5,?6,?7,'llm')",
-                                    rusqlite::params![
-                                        uuid::Uuid::now_v7().to_string(),
-                                        sid,
-                                        op_pname,
-                                        op_pmodel,
-                                        pt as i64,
-                                        ct as i64,
-                                        betterboxd_core::now()
-                                    ],
-                                )
-                            })
-                            .await;
+                        // 开场白同样记账（含成本；profile_usage 累加）
+                        let pricing = cfg.active().map(|p| (p.pricing.clone(), p.currency.clone()));
+                        let (pz, cz) = pricing.unwrap_or_default();
+                        let (cost, cur_) = log_llm_usage(
+                            &db, &cur.id, &pname, &pmodel, pt, ct, hit, miss, &pz, &cz,
+                        )
+                        .await;
                         let _ = tx_o.send(Message::Text(
                             serde_json::json!({"type": "done", "interrupted": false,
-                                "steps": 1, "tokens": {"prompt": pt, "completion": ct}})
+                                "steps": 1, "tokens": {"prompt": pt, "completion": ct,
+                                    "hit": hit, "miss": miss},
+                                "cost": {"value": cost, "currency": cur_}})
                             .to_string()
                             .into(),
                         ));
@@ -1430,36 +1501,30 @@ async fn handle_chat(
 
             match run {
                 Ok(summary) => {
-                    let (pid, pt, ct) = (
-                        task_session.id.clone(),
-                        summary.usage_tokens.0 as i64,
-                        summary.usage_tokens.1 as i64,
-                    );
-                    let _ = db
-                        .call(move |c| {
-                            c.execute(
-                                "INSERT INTO usage_records (id, session_id, profile_name,
-                               model, prompt_tokens, completion_tokens, at, kind)
-                             VALUES (?1,?2,?3,?4,?5,?6,?7,'llm')",
-                                rusqlite::params![
-                                    uuid::Uuid::now_v7().to_string(),
-                                    pid,
-                                    pname,
-                                    pmodel,
-                                    pt,
-                                    ct,
-                                    betterboxd_core::now()
-                                ],
-                            )
-                        })
-                        .await;
+                    let pricing = cfg_snapshot.active().map(|p| (p.pricing.clone(), p.currency.clone())).unwrap_or_default();
+                    let (cost, cur) = log_llm_usage(
+                        &db,
+                        &task_session.id,
+                        &pname,
+                        &pmodel,
+                        summary.usage_tokens.0,
+                        summary.usage_tokens.1,
+                        summary.usage_cache.0,
+                        summary.usage_cache.1,
+                        &pricing.0,
+                        &pricing.1,
+                    )
+                    .await;
                     let tx_done = tx_task.clone();
                     let done = serde_json::json!({
                         "type": "done",
                         "interrupted": summary.interrupted,
                         "steps": summary.steps,
                         "tokens": {"prompt": summary.usage_tokens.0,
-                                    "completion": summary.usage_tokens.1},
+                                    "completion": summary.usage_tokens.1,
+                                    "hit": summary.usage_cache.0,
+                                    "miss": summary.usage_cache.1},
+                        "cost": {"value": cost, "currency": cur},
                         "aborted": summary.aborted_reason,
                     });
                     let _ = tx_done.send(Message::Text(done.to_string().into()));
@@ -1579,14 +1644,331 @@ async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json:
     }
 }
 
+/// 记账：按 pricing 计算本轮成本（输入分缓存命中/未命中，输出按未命中单价×1M；输出缓存命中罕见默认 0）
+/// → 写 usage_records（前三笔在 server 落地后才有 currency）→ profile_usage「缓存用量」累加。
+/// 返回 (本轮成本, 计价货币)。价格字段为每百万 token。
+pub async fn log_llm_usage(
+    db: &DbHandle,
+    session_id: &str,
+    pname: &str,
+    pmodel: &str,
+    pt: u64,
+    ct: u64,
+    cache_hit: u64,
+    cache_miss: u64,
+    pricing: &betterboxd_core::config::Pricing,
+    currency: &str,
+) -> (f64, String) {
+    let miss = pt.saturating_sub(cache_hit) as f64 / 1e6;
+    let hit = cache_hit as f64 / 1e6;
+    let out = ct as f64 / 1e6;
+    let in_cash = hit * pricing.input_cached + miss * pricing.input_uncached;
+    let out_cash = out * pricing.output_uncached;
+    let input_cost = in_cash;
+    let output_cost = out_cash;
+    let cost = in_cash + out_cash;
+    let (sid, pn, m, cur) = (
+        session_id.to_string(),
+        pname.to_string(),
+        pmodel.to_string(),
+        currency.to_string(),
+    );
+    let db2 = db.clone();
+    let (ic, oc) = (input_cost, output_cost);
+    let _ = db2
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO usage_records (id, session_id, profile_name, model,
+                   prompt_tokens, completion_tokens, input_cost, output_cost, currency, at, kind)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'llm')",
+                rusqlite::params![
+                    uuid::Uuid::now_v7().to_string(), sid, pn, m,
+                    pt as i64, ct as i64, ic, oc, cur, betterboxd_core::now()
+                ],
+            )
+        })
+        .await;
+    // 预算「缓存用量」累加（每配置独立）
+    let (pn2, co, cu) = (pname.to_string(), cost, currency.to_string());
+    let db3 = db.clone();
+    let _ = db3
+        .call(move |c| {
+            c.execute(
+                "INSERT INTO profile_usage (profile_name, cost, currency, updated_at)
+                 VALUES (?1,?2,?3,?4)
+                 ON CONFLICT(profile_name) DO UPDATE SET
+                   cost = cost + ?2, currency = ?3, updated_at = ?4",
+                rusqlite::params![pn2, co, cu, betterboxd_core::now()],
+            )
+        })
+        .await;
+    (cost, currency.to_string())
+}
+
+
+// ============ 存档（P4 完善：report 2026-09-04）============
+// 存档列表 ~/.config/betterboxd/archives.json：{active_dir, archives:[{name, dir}]}
+fn read_archives() -> serde_json::Value {
+    std::fs::read_to_string(archives_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_else(|| serde_json::json!({"active_dir": null, "archives": []}))
+}
+fn write_archives(v: &serde_json::Value) -> Result<(), String> {
+    if let Some(p) = archives_path().parent() {
+        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(
+        archives_path(),
+        serde_json::to_string_pretty(v).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
+
+async fn archives_list(State(app): State<App>) -> Response {
+    let v = read_archives();
+    let active = v["active_dir"].as_str().map(String::from).or(Some(app.data_dir.to_string_lossy().to_string()));
+    Json(serde_json::json!({"active_dir": active, "archives": v["archives"], "current": app.data_dir.to_string_lossy().to_string()}))
+        .into_response()
+}
+
+/// 新建存档：parent/name 目录 + 初始化（config.toml 模板 + 空库迁移）。模拟示例数据用 seed_demo。
+async fn archive_create(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let name = args["name"].as_str().unwrap_or("").trim().to_string();
+    let parent = args["parent_dir"].as_str().unwrap_or("").trim().to_string();
+    if name.is_empty() || parent.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "需要 name 与 parent_dir").into_response();
+    }
+    let dir = std::path::PathBuf::from(&parent).join(&name);
+    let lib = dir.join(".betterboxd");
+    if lib.join("data.db").exists() {
+        return (axum::http::StatusCode::CONFLICT, "该目录已存在存档").into_response();
+    }
+    std::fs::create_dir_all(lib.join("sessions")).expect("建目录失败");
+    // config.toml 模板：沿用当前 tmdb key/proxy，空 profile 交由设置页填写
+    let cur_cfg = app.config.lock().unwrap().clone();
+    let tmpl = format!(
+        "# Betterboxd 存档配置\nactive_profile = \"新配置\"\n[[profiles]]\nname = \"新配置\"\nendpoint = \"\"\napi_key = \"\"\nmodel = \"\"\ncontext_length = 8192\nthinking_mode = \"off\"\n",
+    );
+    let proxy_line = cur_cfg
+        .tmdb
+        .proxy
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .map(|p| format!("proxy = \"{}\"\n", p.replace('"', "\\\"")))
+        .unwrap_or_default();
+    let cfg_toml = format!(
+        "{}[tmdb]\nkey = \"{}\"\n{}language = \"{}\"\n",
+        tmpl,
+        cur_cfg.tmdb.key.replace('"', "\\\""),
+        proxy_line,
+        cur_cfg.tmdb.language,
+    );
+    let _ = std::fs::write(lib.join("config.toml"), cfg_toml);
+    // 空库 + 迁移
+    match rusqlite::Connection::open(&lib.join("data.db")) {
+        Ok(c) => {
+            let _ = betterboxd_core::db::apply_migrations(&c);
+        }
+        Err(e) => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("开库失败: {e}")).into_response(),
+    }
+    // 注册 + 设为 active
+    let mut v = read_archives();
+    let list = v["archives"].as_array().cloned().unwrap_or_default();
+    let mut list = list;
+    list.retain(|a| a["dir"].as_str() != Some(dir.to_string_lossy().as_ref()));
+    list.push(serde_json::json!({"name": name, "dir": dir.to_string_lossy().to_string()}));
+    v["archives"] = serde_json::Value::Array(list);
+    v["active_dir"] = serde_json::json!(dir.to_string_lossy().to_string());
+    if write_archives(&v).is_err() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "存档列表写入失败").into_response();
+    }
+    restart_into(dir, name)
+}
+
+/// 载入（注册）既有目录：不校验内部格式（report 裁定可按 UB 处理），加入列表并激活。
+async fn archive_register(State(_app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let dir = args["dir"].as_str().unwrap_or("").trim().to_string();
+    let name = args["name"].as_str().filter(|s| !s.is_empty()).map(String::from)
+        .or_else(|| some_name_from_dir(&dir));
+    if dir.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "需要 dir").into_response();
+    }
+    let p = std::path::PathBuf::from(&dir);
+    if !p.join(".betterboxd").is_dir() {
+        return (axum::http::StatusCode::BAD_REQUEST, "该目录没有 .betterboxd 结构——按 Undefined Behavior 尝试载入？请先确认").into_response();
+    }
+    let mut v = read_archives();
+    let mut list = v["archives"].as_array().cloned().unwrap_or_default();
+    list.retain(|a| a["dir"].as_str() != Some(p.to_string_lossy().as_ref()));
+    let nm = name.unwrap_or_else(|| some_name_from_dir(&dir).unwrap_or_else(|| "存档".into()));
+    list.push(serde_json::json!({"name": nm, "dir": p.to_string_lossy().to_string()}));
+    v["archives"] = serde_json::Value::Array(list);
+    v["active_dir"] = serde_json::json!(p.to_string_lossy().to_string());
+    if write_archives(&v).is_err() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "存档列表写入失败").into_response();
+    }
+    restart_into(p, nm)
+}
+fn some_name_from_dir(dir: &str) -> Option<String> {
+    std::path::Path::new(dir)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+}
+
+/// 切换/激活：写列表 + 重启 server（report 裁定：重启方案）。当前响应先返回，延迟退出让前端看到。
+fn restart_into(dir: std::path::PathBuf, name: String) -> Response {
+    let exe = std::env::current_exe().unwrap_or(std::path::PathBuf::from("betterboxd-server"));
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let exe2 = exe.clone();
+    let mut cmd = std::process::Command::new(exe2);
+    cmd.arg("--data-dir").arg(&dir).current_dir(&cwd);
+    // stdin 置空避免占用终端
+    let _ = std::process::Command::spawn(&mut cmd);
+    let resp = Json(serde_json::json!({"ok": true,
+        "restart": true, "dir": dir.to_string_lossy().to_string(),
+        "name": name, "message": "存档已激活，服务器重启中…"})).into_response();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        std::process::exit(0);
+    });
+    resp
+}
+
+/// 从列表移除（不删文件）；若为当前存档仅移出。
+async fn archive_remove(State(_app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let dir = args["dir"].as_str().unwrap_or("").to_string();
+    let mut v = read_archives();
+    let list = v["archives"].as_array().cloned().unwrap_or_default();
+    let list: Vec<serde_json::Value> = list
+        .into_iter()
+        .filter(|a| a["dir"].as_str() != Some(dir.as_str()))
+        .collect();
+    v["archives"] = serde_json::Value::Array(list);
+    if v["active_dir"].as_str() == Some(dir.as_str()) {
+        v["active_dir"] = serde_json::Value::Null;
+    }
+    if write_archives(&v).is_err() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "写失败").into_response();
+    }
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+// ============ 用量 API（report 2026-09-04）============
+/// 各 profile 计量：总用量（usage_records 历史累计）+ 缓存用量（profile_usage，预算判断+Reset）。
+async fn usage_profiles(State(app): State<App>) -> Response {
+    let totals = app
+        .db
+        .select_json(
+            "SELECT profile_name, SUM(input_cost) AS input, SUM(output_cost) AS output,
+                    SUM(input_cost + output_cost) AS total
+             FROM usage_records WHERE input_cost IS NOT NULL GROUP BY profile_name",
+        )
+        .await
+        .unwrap_or_default();
+    let caches = app
+        .db
+        .select_json("SELECT profile_name, cost, currency FROM profile_usage")
+        .await
+        .unwrap_or_default();
+    let cfg = app.config.lock().unwrap().clone();
+    let mut out = Vec::new();
+    for p in &cfg.profiles {
+        let total = totals
+            .iter()
+            .find(|t| t["profile_name"].as_str() == Some(p.name.as_str()))
+            .map(|t| t["total"].as_f64().unwrap_or(0.0))
+            .unwrap_or(0.0);
+        let cache = caches
+            .iter()
+            .find(|c| c["profile_name"].as_str() == Some(p.name.as_str()))
+            .map(|c| {
+                (
+                    c["cost"].as_f64().unwrap_or(0.0),
+                    c["currency"].as_str().unwrap_or("CNY").to_string(),
+                )
+            })
+            .unwrap_or((0.0, p.currency.clone()));
+        out.push(serde_json::json!({
+            "profile_name": p.name, "total": total,
+            "cache_cost": cache.0, "cache_currency": cache.1,
+            "budget": p.budget, "currency": p.currency,
+            "pricing": {
+                "input_cached": p.pricing.input_cached,
+                "input_uncached": p.pricing.input_uncached,
+                "output_cached": p.pricing.output_cached,
+                "output_uncached": p.pricing.output_uncached,
+            }
+        }));
+    }
+    Json(serde_json::json!({"profiles": out})).into_response()
+}
+
+/// Reset：缓存用量清零（= 重置当前预算周期）。
+async fn usage_reset(State(app): State<App>, Json(args): Json<serde_json::Value>) -> Response {
+    let name = args["profile_name"].as_str().unwrap_or("");
+    if name.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "缺 profile_name").into_response();
+    }
+    let n = name.to_string();
+    let _ = app
+        .db
+        .call(move |c| {
+            Ok(c.execute(
+                "UPDATE profile_usage SET cost=0, updated_at=?2 WHERE profile_name=?1",
+                rusqlite::params![n, betterboxd_core::now()],
+            ))
+        })
+        .await;
+    Json(serde_json::json!({"ok": true})).into_response()
+}
+
+
 fn data_dir_path() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("BB_DATA").unwrap_or_else(|_| "data".into()))
 }
 
+/// 存档列表（用户级）：~/.config/betterboxd/archives.json
+fn archives_path() -> std::path::PathBuf {
+    dirs_home().join(".config").join("betterboxd").join("archives.json")
+}
+fn dirs_home() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .or_else(|_| std::env::var("BB_HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// 解析启动数据目录：--data-dir 参数 > BB_DATA env > 存档 active_dir > 默认 data/
+fn resolve_data_dir() -> std::path::PathBuf {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--data-dir" {
+            if let Some(d) = args.next() {
+                return std::path::PathBuf::from(d);
+            }
+        }
+    }
+    if let Ok(d) = std::env::var("BB_DATA") {
+        return std::path::PathBuf::from(d);
+    }
+    if let Ok(raw) = std::fs::read_to_string(archives_path()) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(d) = v["active_dir"].as_str() {
+                let p = std::path::PathBuf::from(d);
+                if p.join(".betterboxd").exists() {
+                    return p;
+                }
+            }
+        }
+    }
+    std::path::PathBuf::from("data")
+}
+
 #[tokio::main]
 async fn main() {
-    let data_dir =
-        std::path::PathBuf::from(std::env::var("BB_DATA").unwrap_or_else(|_| "data".into()));
+    let data_dir = resolve_data_dir();
     let lib_dir = data_dir.join(".betterboxd");
     std::fs::create_dir_all(lib_dir.join("sessions")).expect("创建数据目录失败");
     let config = ensure_config(&lib_dir);
@@ -1600,18 +1982,26 @@ async fn main() {
     let stats_conn =
         betterboxd_core::db::Db::open_stats_conn(&db_path).expect("只读统计连接打开失败");
     let stats_db = DbHandle::spawn(stats_conn);
-    let profile = config.active().expect("缺少活动模型档案").clone();
-    let client = Arc::new(std::sync::RwLock::new(Some(betterboxd_core::llm::ChatClient::new(
-        &profile.endpoint,
-        &profile.api_key,
-        &profile.model,
-    ))));
+    // 容错：无活动档案时 client=None（设置页补配后生效），不 panic（存档模板可为空配置）
+    let (client, pname, pmodel) = match config.active() {
+        Ok(p) => (
+            Some(betterboxd_core::llm::ChatClient::new(
+                &p.endpoint,
+                &p.api_key,
+                &p.model,
+            )),
+            p.name.clone(),
+            p.model.clone(),
+        ),
+        Err(_) => (None, String::new(), String::new()),
+    };
+    let client = Arc::new(std::sync::RwLock::new(client));
     let tmdb = TmdbClient::new(
         config.tmdb.key.clone(),
         config.tmdb.proxy.clone(),
         config.tmdb.language.clone(),
     );
-    let (pname, pmodel) = (profile.name.clone(), profile.model.clone());
+    let (pname, pmodel) = (pname, pmodel);
     let posters_dir = lib_dir.join("posters");
     std::fs::create_dir_all(&posters_dir).ok();
     let app = Arc::new(AppState {
@@ -1625,6 +2015,7 @@ async fn main() {
         profile_model: Arc::new(Mutex::new(pmodel)),
         pending: Arc::new(Mutex::new(std::collections::HashMap::new())),
         posters_dir,
+        data_dir: data_dir.clone(),
     });
 
     let router = Router::new()
@@ -1648,11 +2039,19 @@ async fn main() {
         .route("/api/poster/{id}", get(poster))
         .route("/api/backdrop/{id}", get(backdrop))
         .route("/api/usage/summary", get(usage_summary))
+        .route("/api/usage/profiles", get(usage_profiles))
+        .route("/api/usage/reset", post(usage_reset))
+        .route("/api/archives", get(archives_list))
+        .route("/api/archives/create", post(archive_create))
+        .route("/api/archives/register", post(archive_register))
+        .route("/api/archives/remove", post(archive_remove))
         .route("/api/tools/execute", post(tools_execute))
         .route("/api/stats/run", post(stats_run))
         .route("/api/saved-queries", get(saved_queries_list))
         .route("/api/saved-queries/{id}", delete(saved_query_delete))
         .route("/api/chats", get(chats_list))
+        .route("/api/chats/export/{id}", get(chat_export))
+        .route("/api/chats/import", post(chat_import))
         .route("/api/chats/{id}", get(chat_detail).delete(chat_delete))
         .route("/api/lists", get(lists_list).post(list_add))
         .route(
@@ -1672,7 +2071,24 @@ async fn main() {
     // 默认只监听回环（评审缺陷 9）：私密随记不应对局域网开放
     let addr: SocketAddr = "127.0.0.1:3000".parse().unwrap();
     println!("Betterboxd server: http://localhost:3000");
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    // 存档切换重启：旧进程 400ms 后才退出，子进程启动时可能端口未释放 → 重试绑定（≤6 秒）
+    let mut listener = None;
+    for _ in 0..15 {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => {
+                listener = Some(l);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            }
+            Err(e) => {
+                eprintln!("bind 失败: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    let listener = listener.expect("端口 3000 持续被占用，无法启动");
     axum::serve(listener, router).await.unwrap();
 }
 

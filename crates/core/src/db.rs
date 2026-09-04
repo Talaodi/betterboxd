@@ -416,7 +416,18 @@ DELETE FROM dimension_values WHERE dimension = '情绪';
 "#;
 
 /// 迁移清单：(版本号, SQL)。追加迁移时在末尾 push，不改历史。
-const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (6, M006), (7, M007)];
+/// M008：profile 级预算计数器「缓存用量」（report 2026-09-04）——每次调用花费累加，
+/// 预算判断只看它；Reset 置 0 = 重置当前预算周期。总用量=usage_records 历史累计。
+const M008: &str = r#"
+CREATE TABLE IF NOT EXISTS profile_usage (
+    profile_name TEXT PRIMARY KEY,
+    cost         REAL NOT NULL DEFAULT 0,
+    currency     TEXT NOT NULL DEFAULT 'CNY',
+    updated_at   INTEGER
+);
+"#;
+
+const MIGRATIONS: &[(i64, &str)] = &[(1, M001), (2, M002), (3, M003), (4, M004), (5, M005), (6, M006), (7, M007), (8, M008)];
 
 /// 当前最新 schema 版本（测试与启动校验用）。
 pub fn latest_version() -> i64 {

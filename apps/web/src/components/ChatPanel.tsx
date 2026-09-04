@@ -17,6 +17,34 @@ export function Markdown({ children }: { children: string }) {
   );
 }
 
+/** 成本展示：0 计价时不显示数额曲线，直接 4 位小数。 */
+function fmtCost(c: { value: number; currency: string }) {
+  if (c.value <= 0) return `${c.currency} 0`;
+  const v = c.value < 0.01 ? c.value.toFixed(4) : c.value.toFixed(3);
+  return `${c.currency} ${v}`;
+}
+
+/** 工具小图标映射（1c：Calling 前加表示工具的小图标）。 */
+const TOOL_ICONS: Record<string, string> = {
+  search_movies: "🔍",
+  search_person_movies: "🔍",
+  get_movie_details: "🎬",
+  get_movie_logs: "📋",
+  lookup_diary: "📝",
+  lookup_reviews: "📖",
+  lookup_taxonomy: "🏷",
+  lookup_chats: "💬",
+  lookup_lists: "📚",
+  run_stats: "📊",
+  list_saved_queries: "📊",
+  get_profile_snapshot: "🎯",
+  manage_diary: "✏️",
+  manage_reviews: "✏️",
+  set_movie_state: "♥",
+  manage_lists: "🗂",
+  manage_saved_queries: "📌",
+};
+
 export default function ChatPanel({
   movieId,
   entryId,
@@ -52,7 +80,7 @@ export default function ChatPanel({
       ? { movieId, entryId, reviewId, sessionId, freshKey }
       : undefined,
   );
-  const { messages, connected, streaming, opening, pendingConfirm, sendUser, interrupt, resolveConfirm } =
+  const { messages, connected, streaming, opening, lastCost, pendingConfirm, sendUser, interrupt, resolveConfirm } =
     chat;
   const [input, setInput] = useState("");
 
@@ -112,22 +140,19 @@ export default function ChatPanel({
         {messages.map((m, i) => {
           // 工具调用进度行（无 B logo）
           if (m.role === "tool") {
+            const icon = TOOL_ICONS[m.name] ?? "🛠";
             return (
               <div key={i} className="pl-10 text-xs text-[#5a6b7c]">
-                calling {m.name} {m.ok === false ? "✗" : m.ok ? "✓" : "…"}
+                {icon} {m.name} {m.ok === false ? "✗" : m.ok ? "✓" : "…"}
               </div>
             );
           }
-          // 中间步骤（流式/未定稿）→ 进度行：Thinking…
-          if (m.role === "assistant" && m.final === false) {
+          // 中间步骤：空文本=Thinking 占位行；有文本=直接按正式气泡渲染（流式增长，done 时不再刷新样式）
+          if (m.role === "assistant" && m.final === false && !m.text.trim()) {
             const isLast = i === messages.length - 1;
-            const t = m.text.trim();
             return (
-              <div
-                key={i}
-                className={"pl-10 text-xs text-[#5a6b7c]" + (isLast && streaming ? " animate-pulse" : "")}
-              >
-                ✱ {t ? (t.length > 120 ? t.slice(0, 120) + "…" : t) : "Thinking…"}
+              <div key={i} className={"pl-10 text-xs text-[#5a6b7c]" + (isLast && streaming ? " animate-pulse" : "")}>
+                ✱ Thinking…
               </div>
             );
           }
@@ -149,7 +174,7 @@ export default function ChatPanel({
                 )}
                 {m.role === "assistant" && m.usage && (
                   <span className="ml-2 text-[10px] text-[#5a6b7c]">
-                    [{m.usage.prompt}+{m.usage.completion} tok]
+                    [{m.usage.prompt}+{m.usage.completion} tok{lastCost ? ` · ${fmtCost(lastCost)}` : ""}]
                   </span>
                 )}
               </span>

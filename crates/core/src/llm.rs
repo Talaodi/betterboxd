@@ -83,6 +83,11 @@ pub struct Usage {
     pub prompt_tokens: Option<u64>,
     #[serde(default)]
     pub completion_tokens: Option<u64>,
+    /// DeepSeek 系缓存命中/未命中输入 token（计费拆分；无则 None 按未命中计）
+    #[serde(default)]
+    pub prompt_cache_hit_tokens: Option<u64>,
+    #[serde(default)]
+    pub prompt_cache_miss_tokens: Option<u64>,
 }
 
 /// 流式 tool_calls 累积器：按 index 合并 id/name/arguments 分片。

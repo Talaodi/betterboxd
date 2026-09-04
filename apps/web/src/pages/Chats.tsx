@@ -133,6 +133,41 @@ export default function Chats() {
       : c.scope === anchor.scope;
   });
 
+  const exportOpen = async () => {
+    if (!open) return;
+    try {
+      const d = await getJson<Record<string, unknown>>(`/api/chats/export/${open.id}`);
+      const blob = new Blob([JSON.stringify(d, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `betterboxd-chat-${open.id.slice(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      alert(`导出失败: ${(e as Error).message}`);
+    }
+  };
+  const importChat = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async () => {
+      const f = input.files?.[0];
+      if (!f) return;
+      try {
+        const text = await f.text();
+        const data = JSON.parse(text);
+        const r = await sendJson<{ session_id: string }>("/api/chats/import", "POST", data);
+        setOpenId(r.session_id);
+        setPendingNew(null);
+        loadChats();
+      } catch (e) {
+        alert(`导入失败: ${(e as Error).message}`);
+      }
+    };
+    input.click();
+  };
+
   const delOpen = async () => {
     if (!open) return;
     if (!window.confirm(`删除会话「${open.title || "（无标题）"}」？此操作不可撤销。`)) return;
@@ -164,13 +199,31 @@ export default function Chats() {
               </button>
             ))}
           </div>
-          <button
-            className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
-            title="新建控制台会话"
-            onClick={() => { setPendingNew({ key: Date.now() }); setOpenId(null); setTab("topic"); }}
-          >
-            + 新建
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              className="rounded px-2 py-1 text-xs text-[#8899aa] hover:text-white"
+              title="导入会话 JSON（本项目格式）"
+              onClick={importChat}
+            >
+              ⬆ 导入
+            </button>
+            {open && (
+              <button
+                className="rounded px-2 py-1 text-xs text-[#8899aa] hover:text-white"
+                title="导出当前会话为 JSON"
+                onClick={exportOpen}
+              >
+                ⬇ 导出
+              </button>
+            )}
+            <button
+              className="rounded bg-[#00e054] px-2 py-1 text-xs font-medium text-[#0c1a10]"
+              title="新建控制台会话"
+              onClick={() => { setPendingNew({ key: Date.now() }); setOpenId(null); setTab("topic"); }}
+            >
+              + 新建
+            </button>
+          </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {chats === null && <p className="px-3 py-2 text-sm text-[#5a6b7c]">加载中…</p>}

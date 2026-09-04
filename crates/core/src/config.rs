@@ -17,6 +17,32 @@ pub struct Profile {
     pub max_output_tokens: Option<u64>,
     #[serde(default)]
     pub extra_body_json: Option<String>,
+    /// 计费（每 1M token；缓存命中输出罕见，默认 0 并 UI 备注）。
+    #[serde(default)]
+    pub pricing: Pricing,
+    /// 计价与预算货币（CNY | USD）
+    #[serde(default = "default_pricing_currency")]
+    pub currency: String,
+    /// 每配置预算（按「缓存用量」判断，见 M008 profile_usage.cost）
+    #[serde(default)]
+    pub budget: Option<f64>,
+}
+
+/// 单价：每 1M token。
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default, PartialEq)]
+pub struct Pricing {
+    #[serde(default)]
+    pub input_cached: f64,
+    #[serde(default)]
+    pub input_uncached: f64,
+    #[serde(default)]
+    pub output_cached: f64,
+    #[serde(default)]
+    pub output_uncached: f64,
+}
+
+fn default_pricing_currency() -> String {
+    "CNY".into()
 }
 fn default_ctx() -> u64 {
     8192

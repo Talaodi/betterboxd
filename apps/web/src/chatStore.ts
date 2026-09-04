@@ -16,7 +16,8 @@ type Frame = {
   session_id?: string;
   interrupted?: boolean;
   steps?: number;
-  tokens?: { prompt: number; completion: number };
+  tokens?: { prompt: number; completion: number; hit?: number; miss?: number };
+  cost?: { value: number; currency: string };
 };
 
 export type Msg =
@@ -51,6 +52,8 @@ type Store = {
   lastScope?: ChatScope;
   /** 开场白阶段（P4）：fresh 连接 hello 后、首个 done 前；期间禁发消息防丢 */
   opening: boolean;
+  /** 最后一轮 done 的成本信息（done 帧 cost 字段） */
+  lastCost?: { value: number; currency: string };
   listeners: Set<() => void>;
 };
 
@@ -93,6 +96,7 @@ function getStore(key: string): Store {
       sessionId: "",
       freshPending: false,
       opening: false,
+      lastCost: undefined,
       listeners: new Set(),
     };
     stores.set(key, s);
@@ -174,6 +178,7 @@ function handleFrame(s: Store, key: string, f: Frame) {
     case "done":
       s.streaming = false;
       s.opening = false;
+      s.lastCost = f.cost;
       {
         // 评审缺陷 24：打断/无文本时也要收口——空进度行丢弃，有文本转正式气泡
         const last = s.messages[s.messages.length - 1];
@@ -296,7 +301,7 @@ export function useChat(scope?: ChatScope) {
     (text: string) => {
       const s = getStore(key);
       if (!s.ws || s.ws.readyState !== WebSocket.OPEN || s.streaming || s.opening) return;
-      s.messages = [...s.messages, { role: "user", text }];
+      s.messages = [...s.messages, { role: "user", text }, { role: "assistant", text: "", final: false }];
       s.acc = "";
       s.streaming = true;
       s.pendingConfirm = null;
@@ -337,6 +342,7 @@ export function useChat(scope?: ChatScope) {
     connected: s.connected,
     streaming: s.streaming,
     opening: s.opening,
+    lastCost: s.lastCost,
     pendingConfirm: s.pendingConfirm,
     sessionId: s.sessionId,
     sendUser,

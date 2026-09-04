@@ -19,7 +19,7 @@ impl TmdbClient {
             // 评审缺陷 6：JSON API 总超时 30s（无 SSE 需求）
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30));
-        if let Some(p) = proxy {
+        if let Some(p) = proxy.filter(|s| !s.trim().is_empty()) {
             builder = builder.proxy(reqwest::Proxy::all(&p).expect("代理地址无效"));
         }
         Self {

@@ -37,6 +37,8 @@ pub struct RunSummary {
     pub steps: usize,
     pub interrupted: bool,
     pub usage_tokens: (u64, u64), // prompt, completion（可中断缺失记 0）
+    /// 输入缓存命中/未命中 token 拆分（DeepSeek 系；预算计费用）
+    pub usage_cache: (u64, u64),
     pub aborted_reason: Option<String>,
 }
 
@@ -72,6 +74,19 @@ pub fn cost_of(rows: &[Value], fx: &std::collections::HashMap<String, f64>, cur:
             c * rate
         })
         .sum::<f64>()
+}
+
+/// profile 级预算预检（缓存用量=profile_usage.cost，每配置独立；Reset 清零即重启预算周期）。
+/// budget 为 None 或未达上限时 Ok；单位=该 profile 计价货币。
+pub fn check_profile_budget(budget: Option<f64>, cost_now: f64) -> Result<(), String> {
+    if let Some(b) = budget {
+        if b > 0.0 && cost_now >= b {
+            return Err(format!(
+                "该配置的用量已达上限（{cost_now:.4}/{b}），请在设置页 Reset 缓存用量或调整预算"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// 预算预检：本月与累计（display_currency，未计价贡献 0）。
@@ -142,6 +157,20 @@ pub async fn run(
     }
 
     budget_check(db, config).await?;
+    // profile 级：预算由「缓存用量」（profile_usage.cost）判断，可 Reset
+    if let Ok(p) = config.active() {
+        let cost: f64 = db
+            .select_json_params(
+                "SELECT cost FROM profile_usage WHERE profile_name=?1".into(),
+                vec![crate::db::SqlVal::Text(p.name.clone())],
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .first()
+            .and_then(|r| r["cost"].as_f64())
+            .unwrap_or(0.0);
+        check_profile_budget(p.budget, cost)?;
+    }
 
     // BUG-1 修复：模型此前无任何日期参照，「今天/昨天」只能靠猜 → 落库错误日期。
     // 每轮实时计算（跨午夜天然正确），不引入 get_now 工具。
@@ -155,7 +184,11 @@ pub async fn run(
          【工具纪律】涉及 add 写操作先搜索确认影片；update/delete 用 lookup_diary 定位 entry_id 即可（无需搜索影片）；         标注维度/标签前先 lookup_taxonomy 复用既有值（如「北影节」应选「北京国际电影节」），没有合适值才新建；统计必须调用 run_stats 用 SQL 计算，\
          禁止自己数数或心算汇总；日期相对词（今年/上月）翻译为 SQLite 日期表达式。\
          SQL 的输出列必须用中文 AS 别名（如 AS 月份、AS 平均分），标签列在前。\n\
-         【统计工作流】①统计前先 list_saved_queries：已有同类项目→用 run_stats 的\
+         【工具引导】凡是涉及用户本库数据的回答（记录/影评/统计/清单/状态/过往对话）必须先用对应工具获取再答；
+         影片事实（年份/导演/剧情/奖）不准凭记忆——先 search_movies 或 get_movie_details；
+         用户说「记一下/改一下」但没给影片时先搜索确认后再写；用户的要求含糊时先问清楚再动手，不要猜。\n\
+         【格式纪律】输出 Markdown 要紧凑：列表项之间、段落之间不输出多余空行（最多一个空行分隔段落）；不要为排版产生连续空行。\
+        【统计工作流】①统计前先 list_saved_queries：已有同类项目→用 run_stats 的\
          saved_query_id 直跑（智能复用）；②没有→写新 SQL 跑 run_stats，\
          并用自然语言+图标（📈🏆✨等）解读结果，禁止裸贴 JSON/表格；\
          ③用户随口求统计→解读完主动问「要保存为统计项目吗」；\
@@ -188,6 +221,8 @@ pub async fn run(
     let mut steps = 0usize;
     let mut prompt_total = 0u64;
     let mut completion_total = 0u64;
+    let mut cache_hit = 0u64;
+    let mut cache_miss = 0u64;
     let mut last_fail: Option<String> = None;
     let mut fail_streak = 0usize;
     let mut interrupted = false;
@@ -243,6 +278,8 @@ pub async fn run(
                 if let Some(u) = &o.usage {
                     prompt_total += u.prompt_tokens.unwrap_or(0);
                     completion_total += u.completion_tokens.unwrap_or(0);
+                    cache_hit += u.prompt_cache_hit_tokens.unwrap_or(0);
+                    cache_miss += u.prompt_cache_miss_tokens.unwrap_or(0);
                 }
                 break;
             }
@@ -253,6 +290,8 @@ pub async fn run(
                     .as_ref()
                     .and_then(|u| u.completion_tokens)
                     .unwrap_or(0);
+                cache_hit += o.usage.as_ref().and_then(|u| u.prompt_cache_hit_tokens).unwrap_or(0);
+                cache_miss += o.usage.as_ref().and_then(|u| u.prompt_cache_miss_tokens).unwrap_or(0);
 
                 if o.tool_calls.is_empty() {
                     messages.push(json!({"role": "assistant", "content": o.text}));
@@ -260,6 +299,7 @@ pub async fn run(
                         steps,
                         interrupted,
                         usage_tokens: (prompt_total, completion_total),
+                        usage_cache: (cache_hit, cache_miss),
                         aborted_reason,
                     });
                 }
@@ -334,6 +374,7 @@ pub async fn run(
                             steps,
                             interrupted: false,
                             usage_tokens: (prompt_total, completion_total),
+                            usage_cache: (cache_hit, cache_miss),
                             aborted_reason,
                         });
                     }
@@ -347,6 +388,7 @@ pub async fn run(
             steps,
             interrupted: true,
             usage_tokens: (prompt_total, completion_total),
+            usage_cache: (cache_hit, cache_miss),
             aborted_reason,
         });
     }
@@ -365,7 +407,7 @@ pub async fn opening_message(
     context_injection: &str,
     cancel: CancellationToken,
     mut on_event: impl FnMut(AgentEvent) + Send,
-) -> Result<(String, (u64, u64)), String> {
+) -> Result<(String, (u64, u64, u64, u64)), String> {
     let today = chrono::Local::now();
     let weekday_cn = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
         [today.weekday().num_days_from_sunday() as usize];
@@ -374,7 +416,7 @@ pub async fn opening_message(
          【当前日期】{}（{}）。\n\
          用户刚进入一个新会话，请发出第一条消息主动开启话题：基于下方上下文，\
          用 2-4 句话点出这部片/这条记录/这篇影评的要点（评分、日期、关键维度等你看到的事实），\
-         再抛出一个具体的讨论方向（问句收尾）。不要罗列全部数据，不要用列表，像朋友聊天一样自然。\
+         然后给出 2-3 个可供选择的讨论方向（标出「可以聊：A…… / B…… / C……」），把选择权交给用户，不要只抛一个确定的问题。不要罗列全部数据，不要用列表，像朋友聊天一样自然。\
          直接输出消息正文，不要任何前缀或解释。",
         today.format("%Y-%m-%d"),
         weekday_cn
@@ -405,9 +447,12 @@ pub async fn opening_message(
     if o.interrupted {
         return Err("开场白已取消".into());
     }
+    let u = o.usage.as_ref();
     let usage = (
-        o.usage.as_ref().and_then(|u| u.prompt_tokens).unwrap_or(0),
-        o.usage.as_ref().and_then(|u| u.completion_tokens).unwrap_or(0),
+        u.and_then(|u| u.prompt_tokens).unwrap_or(0),
+        u.and_then(|u| u.completion_tokens).unwrap_or(0),
+        u.and_then(|u| u.prompt_cache_hit_tokens).unwrap_or(0),
+        u.and_then(|u| u.prompt_cache_miss_tokens).unwrap_or(0),
     );
     Ok((o.text, usage))
 }
