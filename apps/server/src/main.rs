@@ -1815,10 +1815,13 @@ fn write_archives(v: &serde_json::Value) -> Result<(), String> {
 
 async fn archives_list(State(app): State<App>) -> Response {
     let mut v = read_archives();
-    // 保证当前目录必在列表（新环境/被清理后也能「进入当前」；name=目录名）
+    // 保证当前目录必在列表（archives.json 被清理后也能「进入当前」；name=目录名）。
+    // 条件收紧：仅 active_dir==current 时自动注册——删除唯一当前存档后 active 已清空
+    // （active=null），避免「删除即复活」（服务器仍运行在被删目录上，current 永不变）。
     let cur = app.data_dir.to_string_lossy().to_string();
+    let allow_auto_reg = v["active_dir"].as_str().map(|a| a == cur.as_str()).unwrap_or(false);
     let mut list = v["archives"].as_array().cloned().unwrap_or_default();
-    if !list.iter().any(|a| a["dir"].as_str() == Some(cur.as_str())) {
+    if allow_auto_reg && !list.iter().any(|a| a["dir"].as_str() == Some(cur.as_str())) {
         let name = std::path::Path::new(&cur)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
