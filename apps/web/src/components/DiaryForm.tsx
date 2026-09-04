@@ -139,11 +139,13 @@ export function DiaryForm({
   onChange,
   showAdvanced,
   onToggleAdvanced,
+  movieTitle,
 }: {
   data: DiaryFormData;
   onChange: (d: DiaryFormData) => void;
   showAdvanced: boolean;
   onToggleAdvanced: () => void;
+  movieTitle?: string;
 }) {
   const [adding, setAdding] = useState(false);
   const [taxonomy, setTaxonomy] = useState<Taxonomy | null>(null);
@@ -200,6 +202,11 @@ export function DiaryForm({
 
   return (
     <div className="space-y-3">
+      {movieTitle && (
+        <div className="rounded bg-[#2c3440] px-2 py-1 text-sm font-medium text-white">
+          🎬 {movieTitle}
+        </div>
+      )}
       <StarsEditor value={data.rating} onChange={(v) => set({ rating: v })} />
       <input
         type="date"

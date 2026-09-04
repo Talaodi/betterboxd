@@ -20,6 +20,8 @@ type Frame = {
   tokens?: { prompt: number; completion: number; hit?: number; miss?: number };
   cost?: { value: number; currency: string };
   opening?: boolean;
+  batch?: boolean;
+  items?: { name: string; args: Record<string, unknown> }[];
 };
 
 export type Msg =
@@ -39,6 +41,8 @@ export type Pending = {
   name: string;
   args: Record<string, unknown>;
   movieTitle?: string;
+  /** 批量确认卡：同一轮多个写操作 */
+  batch?: { name: string; args: Record<string, unknown>; movieTitle?: string }[];
 };
 
 type Store = {
@@ -184,6 +188,34 @@ function handleFrame(s: Store, key: string, f: Frame) {
       break;
     case "confirm": {
       const args = (f.args ?? {}) as Record<string, unknown>;
+      if (f.batch === true) {
+        // 批量卡：items 每项拉影片名（问题 2: 确认时能核对这些是哪部片）
+        const items = ((f.items ?? []) as { name: string; args: Record<string, unknown> }[]).map((it) => ({
+          name: it.name,
+          args: it.args,
+          movieTitle: undefined as string | undefined,
+        }));
+        s.pendingConfirm = { call_id: f.call_id ?? "", name: "batch", args: {}, batch: items };
+        for (const it of items) {
+          const mid = it.args["movie_id"];
+          if (typeof mid === "number") {
+            fetch(`/api/movie/${mid}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((d) => {
+                const t = d?.movie?.title_main;
+                if (t && s.pendingConfirm?.batch) {
+                  s.pendingConfirm = {
+                    ...s.pendingConfirm,
+                    batch: s.pendingConfirm.batch.map((x) => (x === it ? { ...x, movieTitle: t } : x)),
+                  };
+                  notify(s);
+                }
+              })
+              .catch(() => {});
+          }
+        }
+        break;
+      }
       s.pendingConfirm = { call_id: f.call_id ?? "", name: f.name ?? "", args };
       const mid = args["movie_id"];
       if (typeof mid === "number") {

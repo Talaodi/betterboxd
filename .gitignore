@@ -2,7 +2,4 @@ node_modules
 dist
 target
 *.local
-local.env
-local.env
-local.env
 data/

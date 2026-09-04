@@ -184,6 +184,9 @@ pub async fn run(
          【工具纪律】涉及 add 写操作先搜索确认影片；update/delete 用 lookup_diary 定位 entry_id 即可（无需搜索影片）；         标注维度/标签前先 lookup_taxonomy 复用既有值（如「北影节」应选「北京国际电影节」），没有合适值才新建；统计必须调用 run_stats 用 SQL 计算，\
          禁止自己数数或心算汇总；日期相对词（今年/上月）翻译为 SQLite 日期表达式。\
          SQL 的输出列必须用中文 AS 别名（如 AS 月份、AS 平均分），标签列在前。\n\
+         【搜索歧义规则】搜索返回多个候选、或名字本身含糊（无年份/常见词/疑似译名不唯一）时，必须列出 2-3 个候选（附年份与出处）让用户选择后才继续；禁止自行选第一个、禁止凭猜测补年份。\
+         【确认真实性】「确认/你确定」只能发生在用户明确表态之后；你提出的待确认问题，必须先停下等待用户答复，绝不允许边问边执行或声称「已按你确认的方式处理」。\
+         【写工具节奏】不要在一轮里连续发起多个写工具：要么先整批列出，等用户确认格式后再逐条登记；要么依赖批量确认卡一次确认后执行。\
          【工具引导】凡是涉及用户本库数据的回答（记录/影评/统计/清单/状态/过往对话）必须先用对应工具获取再答；
          影片事实（年份/导演/剧情/奖）不准凭记忆——先 search_movies 或 get_movie_details；
          用户说「记一下/改一下」但没给影片时先搜索确认后再写；用户的要求含糊时先问清楚再动手，不要猜。\n\
@@ -319,7 +322,69 @@ pub async fn run(
                     "tool_calls": tc_json
                 }));
 
+                // —— 写工具收集（批量确认卡）：同一轮 ≥2 个写操作合成一张确认卡，避免逐张覆盖/被迫拒 ——
+                let write_calls: Vec<&crate::llm::CompletedToolCall> = o
+                    .tool_calls
+                    .iter()
+                    .filter(|tc| tools::CONFIRM_TOOLS.contains(&tc.name.as_str()))
+                    .collect();
+
+                // 写批量确认卡：同一轮 ≥2 个写工具 → 在循环内首次触达时整体确认一次。
+                // 拒绝=全部未执行且**立即结束本轮**（不把拒绝当失败重试, 也不让模型下一轮继续撞墙）。
+                let mut batch_done = false;
+                let mut reject_stop_round = false;
                 for tc in &o.tool_calls {
+                    if tools::CONFIRM_TOOLS.contains(&tc.name.as_str())
+                        && write_calls.len() >= 2
+                    {
+                        if batch_done {
+                            continue; // 批量已消费, 跳过其余写工具
+                        }
+                        batch_done = true;
+                        let items: Vec<tools::PendingConfirm> = write_calls
+                            .iter()
+                            .map(|tc| tools::PendingConfirm {
+                                name: tc.name.clone(),
+                                args: serde_json::from_str(&tc.arguments).unwrap_or(json!({})),
+                            })
+                            .collect();
+                        let approved = match &ctx.confirm {
+                            Some(gate) => gate.request_batch(&items).await?,
+                            None => true,
+                        };
+                        if !approved {
+                            messages.push(json!({
+                                "role": "tool",
+                                "tool_call_id": tc.id.clone(),
+                                "content": json!({"error": format!("批量确认被拒绝: {} 项均未执行（如需调整请逐条提出）", items.len())}).to_string()
+                            }));
+                            on_event(AgentEvent {
+                                kind: AgentEventKind::ToolDone { name: "batch_confirm".into(), ok: false },
+                            });
+                            reject_stop_round = true;
+                            break;
+                        }
+                        for it in &write_calls {
+                            let args = serde_json::from_str(&it.arguments).unwrap_or(json!({}));
+                            on_event(AgentEvent {
+                                kind: AgentEventKind::ToolStart { name: it.name.clone(), args: serde_json::to_string(&args).unwrap_or_default() },
+                            });
+                            let result = tools::execute(&it.name, ctx, args).await;
+                            let ok = result.is_ok();
+                            if ok {
+                                fail_streak = 0;
+                                last_fail = None;
+                            }
+                            let payload = match &result {
+                                Ok(v) => v.to_string(),
+                                Err(e) => json!({"error": e}).to_string(),
+                            };
+                            on_event(AgentEvent { kind: AgentEventKind::ToolDone { name: it.name.clone(), ok } });
+                            messages.push(json!({ "role": "tool", "tool_call_id": it.id.clone(), "content": payload }));
+                        }
+                        continue;
+                    }
+                    // —— 单工具（读 + 单写卡）原逻辑 ——
                     let args: Value = serde_json::from_str(&tc.arguments).unwrap_or(json!({}));
                     on_event(AgentEvent {
                         kind: AgentEventKind::ToolStart {
@@ -329,6 +394,24 @@ pub async fn run(
                     });
                     let result = tools::execute(&tc.name, ctx, args).await;
                     let ok = result.is_ok();
+                    // 用户拒绝 ≠ 工具失败：拒绝立即结束本轮（不累计熔断、不回传错误让模型重试）
+                    let is_reject = !ok
+                        && matches!(&result, Err(e) if e.contains("用户拒绝了此操作") || e.contains("批量确认被拒绝"));
+                    if is_reject {
+                        let payload = match &result {
+                            Err(e) => json!({"error": e}).to_string(),
+                            _ => String::new(),
+                        };
+                        on_event(AgentEvent {
+                            kind: AgentEventKind::ToolDone { name: tc.name.clone(), ok: false },
+                        });
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": tc.id.clone(),
+                            "content": payload
+                        }));
+                        break;
+                    }
                     // 严格"同工具连续失败"：成功或换工具都重置
                     if ok {
                         last_fail = None;
@@ -378,6 +461,10 @@ pub async fn run(
                             aborted_reason,
                         });
                     }
+                }
+                if reject_stop_round {
+                    // 用户拒绝: 本轮结束（正常结束, 不报错）, 下轮对话由用户主导
+                    break;
                 }
             }
         }
@@ -467,4 +554,11 @@ pub async fn opening_message(
         u.and_then(|u| u.prompt_cache_miss_tokens).unwrap_or(0),
     );
     Ok((o.text, usage))
+}
+/// 设置 aborted_reason（保留首次原因）。
+fn aborted_reason_replace(current: &mut Option<String>, msg: String) -> Option<String> {
+    if current.is_none() {
+        *current = Some(msg);
+    }
+    current.clone()
 }

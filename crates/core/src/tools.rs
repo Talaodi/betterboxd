@@ -1081,6 +1081,11 @@ pub trait ConfirmGate: Send + Sync {
         &'a self,
         pending: &'a PendingConfirm,
     ) -> BoxFuture<'a, Result<Option<Value>, String>>;
+
+    /// 批量确认（同一轮多个写操作）：true=全部执行, false=全部拒绝；直连路径默认全通过。
+    fn request_batch<'a>(&'a self, _items: &'a [PendingConfirm]) -> BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move { Ok(true) })
+    }
 }
 
 pub const CONFIRM_TOOLS: &[&str] = &[

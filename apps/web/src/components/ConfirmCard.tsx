@@ -20,6 +20,7 @@ type Pending = {
   name: string;
   args: Record<string, unknown>;
   movieTitle?: string;
+  batch?: { name: string; args: Record<string, unknown>; movieTitle?: string }[];
 };
 
 type EntryRow = {
@@ -90,6 +91,52 @@ export default function ConfirmCard({
   onConfirm: (args: Record<string, unknown>) => void;
   onReject: () => void;
 }) {
+  // 批量确认卡：同一轮多个写操作（report：AI 一股脑执行 manage_diary 时编入一张表）
+  if (pending.batch) {
+    return (
+      <div className="rounded-lg border border-[#33414f] bg-[#1b222b] p-3">
+        <p className="mb-2 text-sm font-medium text-white">
+          批量确认: <span className="text-[#8899aa]">{pending.batch.length} 项操作</span>
+          <span className="ml-2 text-xs text-[#ff8000]">(确认后依次执行, 拒绝则全部不执行)</span>
+        </p>
+        <div className="max-h-[260px] overflow-y-auto">
+          <table className="w-full text-left text-xs text-[#8899aa]">
+            <thead>
+              <tr className="border-b border-[#2c3440] text-[#5a6b7c]">
+                <th className="py-1 pr-2">#</th>
+                <th className="py-1 pr-2">操作</th>
+                <th className="py-1 pr-2">影片</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pending.batch.map((it, i) => {
+                const a = it.args ?? {};
+                const day = String(a.watched_date ?? a.signature_date ?? "");
+                return (
+                  <tr key={i} className="border-b border-[#232b35]">
+                    <td className="py-1 pr-2">{i + 1}</td>
+                    <td className="py-1 pr-2">
+                      {it.name}
+                      <span className="text-[#5a6b7c]"> ({String(a.action ?? "")}{(day ? " · " + day : "")})</span>
+                    </td>
+                    <td className="py-1 pr-2 text-white">{it.movieTitle ?? "…"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 flex justify-end gap-2">
+          <button className="rounded border border-[#33414f] px-3 py-1.5 text-xs text-[#8899aa]" onClick={onReject}>
+            全部拒绝
+          </button>
+          <button className="rounded bg-[#00e054] px-4 py-1.5 text-xs font-medium text-[#0c1a10]" onClick={() => onConfirm({})}>
+            全部确认并执行
+          </button>
+        </div>
+      </div>
+    );
+  }
   const action = pending.args?.action as string | undefined;
   const isDiary = pending.name === "manage_diary";
   const isReview = pending.name === "manage_reviews";
@@ -528,6 +575,7 @@ export default function ConfirmCard({
           onChange={setDiaryData}
           showAdvanced={showAdvanced}
           onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+          movieTitle={pending.movieTitle}
         />
       )}
       {!isDiary && (

@@ -48,6 +48,7 @@ struct AppState {
 struct PendingRoute {
     tx: tokio::sync::oneshot::Sender<Result<Option<serde_json::Value>, String>>,
     args: serde_json::Value,
+    is_batch: bool,
 }
 
 #[derive(Deserialize)]
@@ -145,6 +146,33 @@ struct WsGate {
 }
 
 impl betterboxd_core::tools::ConfirmGate for WsGate {
+    fn request_batch<'a>(
+        &'a self,
+        items: &'a [betterboxd_core::tools::PendingConfirm],
+    ) -> futures_util::future::BoxFuture<'a, Result<bool, String>> {
+        Box::pin(async move {
+            let call_id = uuid::Uuid::now_v7().to_string();
+            let frame = serde_json::json!({
+                "type": "confirm",
+                "batch": true,
+                "call_id": call_id,
+                "items": items.iter().map(|it| serde_json::json!({"name": it.name, "args": it.args})).collect::<Vec<_>>(),
+            });
+            let (otx, orx) = tokio::sync::oneshot::channel();
+            self.pending.lock().unwrap().insert(
+                call_id.clone(),
+                PendingRoute { tx: otx, args: json!({}), is_batch: true },
+            );
+            let _ = self.tx.send(Message::Text(frame.to_string().into()));
+            match orx.await {
+                Ok(Ok(Some(_))) => Ok(true),
+                Ok(Ok(None)) => Ok(false),
+                Ok(Err(e)) => Err(e),
+                Err(_) => Err("确认门关闭".into()),
+            }
+        })
+    }
+
     fn request<'a>(
         &'a self,
         pending_req: &'a betterboxd_core::tools::PendingConfirm,
@@ -159,7 +187,7 @@ impl betterboxd_core::tools::ConfirmGate for WsGate {
         let (otx, orx) = tokio::sync::oneshot::channel();
         self.pending.lock().unwrap().insert(
             call_id.clone(),
-            PendingRoute { tx: otx, args: pending_req.args.clone() },
+            PendingRoute { tx: otx, args: pending_req.args.clone(), is_batch: false },
         );
         let _ = self.tx.send(Message::Text(frame.to_string().into()));
 
@@ -2348,6 +2376,16 @@ fn route_confirm(app: &App, frame: &serde_json::Value) {
     let decision = frame["decision"].as_str().unwrap_or("reject");
     let pending = app.pending.lock().unwrap().remove(call_id);
     if let Some(route) = pending {
+        if route.is_batch {
+            // 批量卡：confirm=全部执行（Ok(Some(空对象))语义），reject=全部拒绝（Ok(None)）
+            let payload = if decision == "confirm" {
+                Ok(Some(json!({})))
+            } else {
+                Ok(None)
+            };
+            let _ = route.tx.send(payload);
+            return;
+        }
         let payload = if decision == "confirm" {
             let edited = frame["args"].as_object().map(|_| frame["args"].clone());
             Ok(Some(edited.unwrap_or_else(|| route.args.clone())))
