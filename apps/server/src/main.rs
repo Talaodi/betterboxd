@@ -1501,11 +1501,12 @@ async fn handle_chat(
         };
         let token = CancellationToken::new();
         *cancel.lock().unwrap() = Some(token.clone());
+        // 热加载必须先于一切运行时快照：否则首轮用旧 client/tmdb + 新 config（混合）；
+        // 更严重的是 client=None（空档复制配置文件）时判空在 reload 之前，永远不触发
+        config_reload_if_changed(&app);
 
-    
-
-    let client = app.client.read().unwrap().clone();
-    let Some(client) = client else {
+        let client = app.client.read().unwrap().clone();
+        let Some(client) = client else {
             let _ = tx.send(Message::Text(
                 serde_json::json!({"type": "error",
                     "message": "未配置模型档案，请先在设置页或 config.toml 配置"})
@@ -1515,7 +1516,6 @@ async fn handle_chat(
             continue;
         };
         let tmdb = app.tmdb.read().unwrap().clone();
-        config_reload_if_changed(&app);
         let cfg_snapshot = app.config.lock().unwrap().clone();
         let mut task_session = current.clone();
         let ctx_inj_task = context_injection.clone();

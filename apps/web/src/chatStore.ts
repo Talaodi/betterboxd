@@ -6,12 +6,6 @@
 import { useCallback, useEffect, useState } from "react";
 
 // ===== 确认卡可读化标签（report 切片 30 后：裸 movie_id/list_id/saved_query_id → 名称）=====
-async function fetchMovieName(id: unknown): Promise<string | null> {
-  const r = await fetch(`/api/movie/${id}`);
-  if (!r.ok) return null;
-  const d = await r.json();
-  return (d?.movie?.title_main as string) ?? null;
-}
 async function fetchListName(id: unknown): Promise<string | null> {
   const r = await fetch(`/api/lists/${id}`);
   if (!r.ok) return null;
@@ -25,11 +19,18 @@ async function fetchSqName(id: unknown): Promise<string | null> {
   const q = (d?.queries ?? []).find((x: { id?: string | number }) => String(x.id) === String(id));
   return (q?.name as string) ?? null;
 }
-function setConfirmLabel(s: Store, id: unknown, fn: (v: unknown) => Promise<string | null>, key: string) {
+// call_id 绑定校验：确认卡可能被拒后换新卡，迟到的 fetch 不得写错卡
+function setConfirmLabel(
+  s: Store,
+  callId: string,
+  id: unknown,
+  fn: (v: unknown) => Promise<string | null>,
+  key: string,
+) {
   if (!id) return;
   fn(id)
     .then((name) => {
-      if (name && s.pendingConfirm) {
+      if (name && s.pendingConfirm?.call_id === callId) {
         s.pendingConfirm = {
           ...s.pendingConfirm,
           labels: { ...s.pendingConfirm.labels, [key]: name },
@@ -221,23 +222,28 @@ function handleFrame(s: Store, key: string, f: Frame) {
       break;
     case "confirm": {
       const args = (f.args ?? {}) as Record<string, unknown>;
-      s.pendingConfirm = { call_id: f.call_id ?? "", name: f.name ?? "", args };
+      const callId = f.call_id ?? "";
+      s.pendingConfirm = { call_id: callId, name: f.name ?? "", args };
+      // movie_id → movieTitle + labels.movie_name 一次请求（movie_detail 是重接口, 别拆两次）
       const mid = args["movie_id"];
       if (typeof mid === "number") {
         fetch(`/api/movie/${mid}`)
           .then((r) => (r.ok ? r.json() : null))
           .then((d) => {
             const t = d?.movie?.title_main;
-            if (t && s.pendingConfirm) {
-              s.pendingConfirm = { ...s.pendingConfirm, movieTitle: t };
+            if (t && s.pendingConfirm?.call_id === callId) {
+              s.pendingConfirm = {
+                ...s.pendingConfirm,
+                movieTitle: t,
+                labels: { ...s.pendingConfirm.labels, movie_name: t },
+              };
               notify(s);
             }
           })
           .catch(() => {});
       }
-      setConfirmLabel(s, args["movie_id"], fetchMovieName, "movie_name");
-      setConfirmLabel(s, args["list_id"], fetchListName, "list_name");
-      setConfirmLabel(s, args["saved_query_id"], fetchSqName, "sq_name");
+      setConfirmLabel(s, callId, args["list_id"], fetchListName, "list_name");
+      setConfirmLabel(s, callId, args["saved_query_id"], fetchSqName, "sq_name");
       break;
     }
     case "done":
