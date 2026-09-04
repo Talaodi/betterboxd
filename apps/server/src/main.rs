@@ -1409,11 +1409,10 @@ async fn handle_chat(
                 cur
             }))
         } else {
-            // 未配置 AI：通知前端（opening 结束态，避免界面卡在「开场中」）
+            // 未配置 AI：新建会话即报错（error 帧 → 前端 ⚠ 气泡；不再静默）
             let _ = tx.send(Message::Text(
-                serde_json::json!({"type": "done", "interrupted": false,
-                    "steps": 0, "tokens": {"prompt": 0, "completion": 0},
-                    "aborted": Some("尚未配置 AI 模型：请先到「设置」配置".to_string())})
+                serde_json::json!({"type": "error",
+                    "message": "尚未配置 AI 模型：请先到「设置」→「模型配置」添加配置后再开始对话"})
                 .to_string()
                 .into(),
             ));
@@ -1844,7 +1843,7 @@ async fn archive_create(State(app): State<App>, Json(args): Json<serde_json::Val
     // config.toml 模板：沿用当前 tmdb key/proxy，空 profile 交由设置页填写
     let cur_cfg = app.config.lock().unwrap().clone();
     let tmpl = format!(
-        "# Betterboxd 存档配置\nactive_profile = \"新配置\"\n[[profiles]]\nname = \"新配置\"\nendpoint = \"\"\napi_key = \"\"\nmodel = \"\"\ncontext_length = 8192\nthinking_mode = \"off\"\n",
+        "# Betterboxd 存档配置\n# 未配置模型：请到「设置」→「模型配置」添加（保存后自动生效）\n",
     );
     let proxy_line = cur_cfg
         .tmdb

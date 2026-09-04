@@ -30,6 +30,10 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
         .then((d) => {
           if (d && d.current && d.current === target) {
             clearInterval(timer);
+            // 新建存档引导：重载后直达设置页（sessionStorage flag + hash 双保险）
+            if (sessionStorage.getItem("bb-needs-setup") === "1") {
+              window.location.hash = "#/settings";
+            }
             window.location.reload();
           }
         })
