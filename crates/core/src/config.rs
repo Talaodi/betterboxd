@@ -12,6 +12,9 @@ pub struct Profile {
     pub context_length: u64,
     #[serde(default)]
     pub thinking_mode: String, // off | on | advanced
+    /// 思考强度：预期 reasoning 预算 (tokens)；模型不支持时被忽略
+    #[serde(default)]
+    pub thinking_budget: Option<u32>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub max_output_tokens: Option<u64>,

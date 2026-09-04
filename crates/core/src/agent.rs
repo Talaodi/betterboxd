@@ -252,6 +252,14 @@ pub async fn run(
             if let Some(m) = p.max_output_tokens {
                 sampling["max_tokens"] = json!(m);
             }
+            // 思考模式与强度（openai 兼容 thinking 参数；模型不支持时忽略）
+            if p.thinking_mode == "on" || p.thinking_mode == "advanced" {
+                let think = json!({"type": "enabled"});
+                sampling["thinking"] = think;
+                if let Some(b) = p.thinking_budget {
+                    sampling["thinking"] = json!({"type": "enabled", "budget_tokens": b});
+                }
+            }
         }
 
         let outcome = {
@@ -477,11 +485,18 @@ pub async fn opening_message(
             kind: AgentEventKind::Token(t.into()),
         })
     };
+    let mut extra = json!({});
+    if _config.active().map(|p| p.thinking_mode == "on" || p.thinking_mode == "advanced").unwrap_or(false) {
+        extra["thinking"] = json!({"type": "enabled"});
+        if let Some(b) = _config.active().ok().and_then(|p| p.thinking_budget) {
+            extra["thinking"] = json!({"type": "enabled", "budget_tokens": b});
+        }
+    }
     let o = client
         .chat_stream(
             &[json!({"role": "system", "content": system})],
             None,
-            None,
+            Some(extra),
             &cancel,
             &mut emit,
         )

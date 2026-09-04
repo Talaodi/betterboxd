@@ -9,7 +9,7 @@ type Pricing = {
 };
 type Profile = {
   name: string; endpoint: string; api_key: string; model: string;
-  context_length: number; thinking_mode: string;
+  context_length: number; thinking_mode: string; thinking_budget: number | null;
   temperature: number | null; top_p: number | null;
   max_output_tokens: number | null; extra_body_json: string | null;
   pricing: Pricing; currency: string; budget: number | null;
@@ -65,7 +65,7 @@ export default function Settings() {
     setEditing({ index: config.profiles.length, isNew: true });
     setDraft({
       name: `配置${config.profiles.length + 1}`, endpoint: "", api_key: "", model: "",
-      context_length: 8192, thinking_mode: "off", temperature: null, top_p: null,
+      context_length: 8192, thinking_mode: "off", thinking_budget: null, temperature: null, top_p: null,
       max_output_tokens: null, extra_body_json: null,
       pricing: { input_cached: 0, input_uncached: 0, output_cached: 0, output_uncached: 0 },
       currency: "CNY", budget: null,
@@ -201,6 +201,18 @@ export default function Settings() {
               <label className="text-xs text-[#8899aa]">Max Tokens
                 <input type="number" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.max_output_tokens ?? ""}
                   onChange={(e) => setDraft({ ...draft, max_output_tokens: e.target.value === "" ? null : Number(e.target.value) })} />
+              </label>
+              <label className="text-xs text-[#8899aa]">思考模式
+                <select className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.thinking_mode}
+                  onChange={(e) => setDraft({ ...draft, thinking_mode: e.target.value })}>
+                  <option value="off">关闭</option>
+                  <option value="on">开启</option>
+                  <option value="advanced">开启 (高级)</option>
+                </select>
+              </label>
+              <label className="text-xs text-[#8899aa]">思考强度 (推理预算 tokens, 选填)
+                <input type="number" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.thinking_budget ?? ""}
+                  onChange={(e) => setDraft({ ...draft, thinking_budget: e.target.value === "" ? null : Number(e.target.value) })} placeholder="如 2000" />
               </label>
               <label className="text-xs text-[#8899aa]">温度 Temperature
                 <input type="number" step="0.1" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.temperature ?? ""}
