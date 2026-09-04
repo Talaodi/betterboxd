@@ -2,38 +2,11 @@
 
 本项目作为清华大学程序设计训练 (Rust) 课程的大作业开发, 目前处于 Demo 阶段, 开发过程使用 Opencode + GLM / Deepseek 辅助.
 
-Betterboxd 是专为影迷开发的综合助手, 本身不仅是一个完善且成熟的包含 Diary / Review / List 等功能的记录工具, 还结合 AI 综合优化使用体验.
+Betterboxd 是专为影迷开发的综合助手, 本身不仅是一个完善且成熟的记录工具, 还结合 AI 综合优化使用体验.
 
 本项目使用 TMDB (The Movie Database) 作为数据库, 由其 API 使用规范, API Key 不得公开传播. 为了能够正常使用本项目请自行注册 API Key (免费快捷, 过程约 5 分钟). [注册方式](./docs/About-tmdb-api.md).
 
-
 ## 构建
-
-需要以下环境:
-
-| 工具 | 版本 |
-|---|---|
-| Rust | ≥ 1.85 |
-| Node.js | ≥ 18 |
-| npm | ≥ 9 |
-| C 编译器 | 任选其一 |
-
-**跨平台**：Windows / macOS / Linux（含 WSL2）均可编译运行。没有平台专属代码；整个仓库可编译为原生二进制。运行约束见「四、运行」。
-
-## 构建（推荐脚本，自动完成前端 + 后端）
-
-```bash
-# Linux / macOS（终端）
-./build.sh                # 或 ./build.sh --release 出优化二进制
-
-# macOS（Finder 双击）
-./build.command
-
-# Windows（双击或命令行运行）
-build.bat                 # 或 build.bat --release
-```
-
-等价手动步骤：
 
 ```bash
 # 1) 前端
