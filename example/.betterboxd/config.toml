@@ -6,7 +6,8 @@ endpoint = "https://api.deepseek.com"
 api_key = ""
 model = "deepseek-v4-flash-vision-exp"
 context_length = 1000000
-thinking_mode = "off"
+thinking_mode = "on"
+thinking_strength = "high"
 currency = "CNY"
 budget = 0.05
 
