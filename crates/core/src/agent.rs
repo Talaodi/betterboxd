@@ -252,12 +252,11 @@ pub async fn run(
             if let Some(m) = p.max_output_tokens {
                 sampling["max_tokens"] = json!(m);
             }
-            // 思考模式与强度（openai 兼容 thinking 参数；模型不支持时忽略）
-            if p.thinking_mode == "on" || p.thinking_mode == "advanced" {
-                let think = json!({"type": "enabled"});
-                sampling["thinking"] = think;
-                if let Some(b) = p.thinking_budget {
-                    sampling["thinking"] = json!({"type": "enabled", "budget_tokens": b});
+            // 思考模式与强度（openai 兼容: thinking + reasoning_effort; 模型不支持时忽略）
+            if p.thinking_mode == "on" {
+                sampling["thinking"] = json!({"type": "enabled"});
+                if let Some(eff) = &p.thinking_strength {
+                    sampling["reasoning_effort"] = json!(eff);
                 }
             }
         }
@@ -486,10 +485,10 @@ pub async fn opening_message(
         })
     };
     let mut extra = json!({});
-    if _config.active().map(|p| p.thinking_mode == "on" || p.thinking_mode == "advanced").unwrap_or(false) {
+    if _config.active().map(|p| p.thinking_mode == "on").unwrap_or(false) {
         extra["thinking"] = json!({"type": "enabled"});
-        if let Some(b) = _config.active().ok().and_then(|p| p.thinking_budget) {
-            extra["thinking"] = json!({"type": "enabled", "budget_tokens": b});
+        if let Some(eff) = _config.active().ok().and_then(|p| p.thinking_strength) {
+            extra["reasoning_effort"] = json!(eff);
         }
     }
     let o = client
