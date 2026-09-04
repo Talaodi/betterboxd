@@ -176,7 +176,10 @@ export default function Chats() {
     if (!window.confirm(`删除会话「${open?.title || "（新会话）"}」？此操作不可撤销。`)) return;
     try {
       await sendJson(`/api/chats/${sid}`, "DELETE");
-      if (open) setOpenId(null);
+      setOpenId(null);
+      // 关键：fresh 会话删除后必须卸载面板+清 sid，否则下一轮消息会 ON CONFLICT 复活/幽灵按钮
+      setPendingNew(null);
+      setPendingNewSid("");
       loadChats();
     } catch (e) {
       alert(`删除失败: ${(e as Error).message}`);

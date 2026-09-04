@@ -20,7 +20,10 @@ impl TmdbClient {
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30));
         if let Some(p) = proxy.filter(|s| !s.trim().is_empty()) {
-            builder = builder.proxy(reqwest::Proxy::all(&p).expect("代理地址无效"));
+            if let Ok(pr) = reqwest::Proxy::all(&p) {
+                builder = builder.proxy(pr);
+            }
+            // 坏代理地址：降级直连（不 panic；config_save 重建路径可触发）
         }
         Self {
             http: builder.build().expect("HTTP 客户端构建失败"),
@@ -62,6 +65,9 @@ impl TmdbClient {
     /// 网络错误脱敏：reqwest 错误文本含完整 URL（api_key 明文）——不可进会话 JSON / AI 上下文。
     fn redact(&self, e: &reqwest::Error) -> String {
         let msg = format!("{e}");
+        if self.key.is_empty() {
+            return msg;
+        }
         msg.replace(&format!("api_key={}&", self.key), "api_key=***&")
             .replace(&format!("api_key={}", self.key), "api_key=***")
             .replace(self.key.as_str(), "***")

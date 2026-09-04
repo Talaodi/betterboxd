@@ -44,6 +44,17 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [switching]);
 
+  // 30s 轮询超时：解除切换锁（提示用户可手动刷新），防止永久卡死
+  useEffect(() => {
+    if (!switching) return;
+    const t = setTimeout(() => {
+      setSwitching(false);
+      setTargetDir("");
+      alert("切换存档超时：请稍后刷新页面重试（若服务器未能重启，请检查进程日志）");
+    }, 32000);
+    return () => clearTimeout(t);
+  }, [switching]);
+
   const pick = async (a: Archive) => {
     if (switching) return;
     if ((a as Archive & { missing?: boolean }).missing) {

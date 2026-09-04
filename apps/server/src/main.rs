@@ -1680,12 +1680,19 @@ async fn config_get(State(app): State<App>) -> Response {
 async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json::Value>) -> Response {
     let cfg = app.config.lock().unwrap().clone();
     if let Some(new_profiles) = new_cfg.get_mut("profiles").and_then(|p| p.as_array_mut()) {
-        // 缺陷 14：掩码 key 按**档案名**回填（下标在重排/插入时会错位）
+        // 缺陷 14：掩码 key 按**档案名**回填（下标在重排/插入时会错位）；
+        // report 评审：编辑弹窗改名后 name 失配——按掩码值匹配兜底回填
         for np in new_profiles.iter_mut() {
             let masked = np.get("api_key").and_then(|k| k.as_str()).map(|s| s.contains("...")).unwrap_or(false);
-            if masked
-                && let Some(name) = np.get("name").and_then(|n| n.as_str())
+            if !masked {
+                continue;
+            }
+            if let Some(name) = np.get("name").and_then(|n| n.as_str())
                 && let Some(old) = cfg.profiles.iter().find(|p| p.name == name)
+            {
+                np["api_key"] = serde_json::json!(old.api_key.clone());
+            } else if let Some(ink) = np.get("api_key").and_then(|k| k.as_str())
+                && let Some(old) = cfg.profiles.iter().find(|p| mask_key(&p.api_key) == ink)
             {
                 np["api_key"] = serde_json::json!(old.api_key.clone());
             }
@@ -1948,15 +1955,17 @@ async fn archive_delete(State(_app): State<App>, Json(args): Json<serde_json::Va
         return (axum::http::StatusCode::BAD_REQUEST, "需要 dir").into_response();
     }
     let mut v = read_archives();
-    if v["active_dir"].as_str() == Some(dir.as_str()) {
-        return (axum::http::StatusCode::CONFLICT, "不能删除当前正在使用的存档").into_response();
-    }
+    // 用户裁定（7ea5ce9）：所有存档均可删除（含当前）——删除当前活动存档清 active 标记；
+    // 运行中目录文件删除后进程句柄仍存活（本次会话不受影响），下次启动自动回退默认存档。
     let list = v["archives"].as_array().cloned().unwrap_or_default();
     let list: Vec<serde_json::Value> = list
         .into_iter()
         .filter(|a| a["dir"].as_str() != Some(dir.as_str()))
         .collect();
     v["archives"] = serde_json::Value::Array(list);
+    if v["active_dir"].as_str() == Some(dir.as_str()) {
+        v["active_dir"] = serde_json::Value::Null;
+    }
     if let Err(e) = write_archives(&v) {
         return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("列表写入失败: {e}")).into_response();
     }
@@ -2127,6 +2136,15 @@ async fn movie_display_title(db: &DbHandle, mid: Option<i64>) -> String {
     .ok()
     .and_then(|r| r.first().and_then(|x| x["t"].as_str().map(String::from)))
     .unwrap_or_else(|| "影片".into())
+}
+
+/// 掩码（api_key 展示/回填判定共用；与 config_get 掩码格式一致）。
+fn mask_key(k: &str) -> String {
+    if k.len() <= 8 {
+        "****".to_string()
+    } else {
+        format!("{}...{}", &k[..4], &k[k.len() - 4..])
+    }
 }
 
 fn data_dir_path() -> std::path::PathBuf {

@@ -16,6 +16,7 @@ type Frame = {
   session_id?: string;
   interrupted?: boolean;
   steps?: number;
+  aborted?: string;
   tokens?: { prompt: number; completion: number; hit?: number; miss?: number };
   cost?: { value: number; currency: string };
   opening?: boolean;
@@ -203,6 +204,22 @@ function handleFrame(s: Store, key: string, f: Frame) {
       s.streaming = false;
       s.opening = false;
       s.lastCost = f.cost;
+      {
+        // 熔断/步数上限/预算拦截等 aborted 原因：无处展示则补提醒气泡（否则用户只见 ✗ 或空白）
+        const reason = f.aborted ?? "";
+        if (reason) {
+          const last = s.messages[s.messages.length - 1];
+          const lastIsFinalText =
+            last?.role === "assistant" &&
+            ((last.final === true && last.text && last.text !== reason) || last.final === undefined);
+          if (!lastIsFinalText) {
+            s.messages = [
+              ...s.messages,
+              { role: "assistant", text: `⚠ 已中止：${reason}`, final: true },
+            ];
+          }
+        }
+      }
       {
         // 评审缺陷 24：打断/无文本时也要收口——空进度行丢弃，有文本转正式气泡
         const last = s.messages[s.messages.length - 1];

@@ -91,8 +91,14 @@ export default function Settings() {
   };
   const setActive = (name: string) => save({ ...config, active_profile: name });
   const delProfile = (i: number) => {
-    if (!window.confirm(`删除配置「${config.profiles[i].name}」？`)) return;
-    save({ ...config, profiles: config.profiles.filter((_, j) => j !== i) });
+    const victim = config.profiles[i];
+    if (!victim) return;
+    if (!window.confirm(`删除配置「${victim.name}」？`)) return;
+    const rest = config.profiles.filter((_, j) => j !== i);
+    // 删除活动配置 → active_profile 交接（下一个或清空），否则 active() 失败致 client None
+    const active =
+      config.active_profile === victim.name ? (rest[0]?.name ?? null) : config.active_profile;
+    save({ ...config, profiles: rest, active_profile: active });
   };
 
   const maskKey = (k: string) => (k.length <= 7 ? "****" : `${k.slice(0, 4)}****${k.slice(-3)}`);
