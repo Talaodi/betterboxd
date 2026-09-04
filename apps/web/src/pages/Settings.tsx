@@ -65,7 +65,7 @@ export default function Settings() {
     setEditing({ index: config.profiles.length, isNew: true });
     setDraft({
       name: `配置${config.profiles.length + 1}`, endpoint: "", api_key: "", model: "",
-      context_length: 8192, thinking_mode: "off", thinking_budget: null, temperature: null, top_p: null,
+      context_length: 8192, thinking_mode: "off", thinking_strength: "high", temperature: null, top_p: null,
       max_output_tokens: null, extra_body_json: null,
       pricing: { input_cached: 0, input_uncached: 0, output_cached: 0, output_uncached: 0 },
       currency: "CNY", budget: null,

@@ -487,7 +487,7 @@ pub async fn opening_message(
     let mut extra = json!({});
     if _config.active().map(|p| p.thinking_mode == "on").unwrap_or(false) {
         extra["thinking"] = json!({"type": "enabled"});
-        if let Some(eff) = _config.active().ok().and_then(|p| p.thinking_strength) {
+        if let Some(eff) = _config.active().ok().and_then(|p| p.thinking_strength.clone()) {
             extra["reasoning_effort"] = json!(eff);
         }
     }
