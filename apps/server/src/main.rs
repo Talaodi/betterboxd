@@ -105,6 +105,7 @@ fn ensure_config(lib_dir: &std::path::Path) -> Config {
                 model: kv.get("COURSE_MODEL").cloned().unwrap_or_default(),
                 context_length: 8192,
                 thinking_mode: "off".into(),
+            thinking_budget: None,
                 temperature: None,
                 top_p: None,
                 max_output_tokens: None,
