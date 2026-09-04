@@ -59,6 +59,14 @@ impl TmdbClient {
         }
     }
 
+    /// 网络错误脱敏：reqwest 错误文本含完整 URL（api_key 明文）——不可进会话 JSON / AI 上下文。
+    fn redact(&self, e: &reqwest::Error) -> String {
+        let msg = format!("{e}");
+        msg.replace(&format!("api_key={}&", self.key), "api_key=***&")
+            .replace(&format!("api_key={}", self.key), "api_key=***")
+            .replace(self.key.as_str(), "***")
+    }
+
     async fn get(&self, path: &str, query: &str) -> Result<Value, String> {
         if !self.enabled {
             return Err("TMDB 已禁用（测试模式）".into());
@@ -73,7 +81,7 @@ impl TmdbClient {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("TMDB 网络错误: {e}"))?;
+            .map_err(|e| format!("TMDB 网络错误: {}", self.redact(&e)))?;
         let status = resp.status();
         let body: Value = resp
             .json()
@@ -179,7 +187,7 @@ impl TmdbClient {
             .get(&url)
             .send()
             .await
-            .map_err(|e| format!("TMDB 网络错误: {e}"))?;
+            .map_err(|e| format!("TMDB 网络错误: {}", self.redact(&e)))?;
         let status = resp.status();
         let body: Value = resp
             .json()
