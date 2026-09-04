@@ -42,7 +42,7 @@ cargo build                # 产物 target/debug/betterboxd-server
 
 ## 快速开始
 
-界面截图见 `./pictures/` (按功能命名: diary-list / reviews-list / films-grid / movie-detail / search-results / lists-overview / list-detail / stats-page / chat-record-import / chat-stats-saved-query 等).
+界面截图见 `./pictures/` (按功能命名: diary-list / reviews-list / films-grid / movie-detail / search-results / lists-overview / list-detail / stats-page / settings-config / chat-stats-saved-query 等).
 
 项目提供了 `./example/` 作为样例数据展示各项功能, 可自行载入存档. 该存档已经删除各项 API Key 的配置, 记得手动去配置一下. 该存档专为展示功能而构造, 其内容不能代表作者的想法.
 
