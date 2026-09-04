@@ -1877,19 +1877,11 @@ async fn archive_create(State(app): State<App>, Json(args): Json<serde_json::Val
     let tmpl = format!(
         "# Betterboxd 存档配置\n# 未配置模型：请到「设置」→「模型配置」添加（保存后自动生效）\n",
     );
-    let proxy_line = cur_cfg
-        .tmdb
-        .proxy
-        .clone()
-        .filter(|s| !s.trim().is_empty())
-        .map(|p| format!("proxy = \"{}\"\n", p.replace('"', "\\\"")))
-        .unwrap_or_default();
+    // TMDB Key 不在新档模板继承（隐私: 新存档 config.toml 落在用户任选的目录, 不得携带主档密钥）,
+    // 由用户在该存档设置页填写; proxy 同样不继承。
     let cfg_toml = format!(
-        "{}[tmdb]\nkey = \"{}\"\n{}language = \"{}\"\n",
+        "{}[tmdb]\nkey = \"\"\nlanguage = \"zh-CN\"\n",
         tmpl,
-        cur_cfg.tmdb.key.replace('"', "\\\""),
-        proxy_line,
-        cur_cfg.tmdb.language,
     );
     let _ = std::fs::write(lib.join("config.toml"), cfg_toml);
     // 空库 + 迁移
