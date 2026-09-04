@@ -17,6 +17,8 @@ pub struct ToolCtx {
     pub confirm: Option<std::sync::Arc<dyn ConfirmGate>>,
     /// 断言 source 语义（评审缺陷 7）：Agent 路径 = "agent"，GUI/REST = "edit"。
     pub source: &'static str,
+    /// 会话存储（lookup_chats 读全文用）；无会话存储的路径为 None → 列表级查询。
+    pub sessions: Option<std::sync::Arc<crate::session::SessionStore>>,
 }
 
 impl ToolCtx {
@@ -161,6 +163,25 @@ pub fn registry() -> ToolRegistry {
                 ),
             },
             ToolMeta {
+                name: "lookup_taxonomy",
+                description: "查询我的维度值池与标签库（地点/场景/同伴的既有值+使用频次，自由标签高频值）。给记录标注维度或标签前先查本工具：优先复用既有值（如「北影节」应选既有值「北京国际电影节」而不是创建新值），保持数据一致。",
+                parameters: obj_schema(json!({}), &[]),
+            },
+            ToolMeta {
+                name: "lookup_chats",
+                description: "查询历史对话：无 session_id=会话列表（可按 movie/entry/review 过滤，含标题与时间）；传 session_id=该会话消息全文。用户问「我们之前聊过什么」时使用。",
+                parameters: obj_schema(
+                    json!({
+                        "movie_id": {"type": "integer"},
+                        "entry_id": {"type": "string"},
+                        "review_id": {"type": "string"},
+                        "session_id": {"type": "string", "description": "传则返回该会话消息全文"},
+                        "limit": {"type": "integer"}
+                    }),
+                    &[],
+                ),
+            },
+            ToolMeta {
                 name: "manage_lists",
                 description: "管理影片清单：create（name 必填，ranked 开关）、update（list_id+名称/描述/ranked）、delete（list_id）、add_item（list_id+movie_id，ranked 清单 rank 缺省自动追加队尾）、remove_item（list_id+movie_id）。Letterboxd 镜像清单只读，禁止修改/删除。先 lookup_lists 拿 list_id。",
                 parameters: obj_schema(
@@ -254,6 +275,8 @@ pub async fn execute(name: &str, ctx: &ToolCtx, args: Value) -> Result<Value, St
         "get_movie_details" => get_movie_details(ctx, &args).await,
         "lookup_diary" => lookup_diary(ctx, &args).await,
         "lookup_reviews" => lookup_reviews(ctx, &args).await,
+        "lookup_taxonomy" => lookup_taxonomy(ctx).await,
+        "lookup_chats" => lookup_chats(ctx, &args).await,
         "search_person_movies" => search_person_movies(ctx, &args).await,
         "get_movie_logs" => get_movie_logs(ctx, &args).await,
         "run_stats" => run_stats(ctx, &args).await,
@@ -623,6 +646,101 @@ async fn search_person_movies(ctx: &ToolCtx, args: &Value) -> Result<Value, Stri
         "total_credits": total,
         "movies": credits.into_iter().take(limit).collect::<Vec<_>>(),
     }))
+}
+
+/// 维度值池+标签库（taxonomy）：标注前复用既有值，避免同义新值碎片化。
+async fn lookup_taxonomy(ctx: &ToolCtx) -> Result<Value, String> {
+    let dims = ctx
+        .db
+        .select_json(
+            "SELECT dv.dimension AS dimension, dv.name AS name,
+                    COALESCE(ed.cnt, 0) AS used
+             FROM dimension_values dv
+             LEFT JOIN (SELECT value_id, COUNT(*) AS cnt FROM entry_dimensions GROUP BY value_id) ed
+               ON ed.value_id = dv.id
+             ORDER BY dv.dimension, used DESC, dv.name",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let tags = ctx
+        .db
+        .select_json(
+            "SELECT t.name AS name, COUNT(et.entry_id) AS used
+             FROM tags t LEFT JOIN entry_tags et ON et.tag_id = t.id
+             GROUP BY t.id ORDER BY used DESC, t.name",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"维度值池": dims, "自由标签": tags}))
+}
+
+/// 历史会话查询：列表级（chat_sessions 索引行）+ 单会话消息全文（session JSON）。
+async fn lookup_chats(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
+    use crate::db::SqlVal;
+    // 单会话全文
+    if let Some(sid) = get_str(args, "session_id").map(String::from) {
+        let Some(store) = &ctx.sessions else {
+            return Err("当前路径无会话存储，仅支持列表级查询".into());
+        };
+        return match store.load(&sid) {
+            Some(sess) => {
+                let msgs: Vec<Value> = sess
+                    .messages
+                    .iter()
+                    .filter_map(|m| {
+                        let role = m["role"].as_str()?;
+                        // tool 消息对用户回顾无价值，跳过
+                        if role == "tool" {
+                            return None;
+                        }
+                        let text = match &m["content"] {
+                            Value::String(t) => t.clone(),
+                            Value::Null => String::new(),
+                            other => other.to_string(),
+                        };
+                        Some(json!({"role": role, "text": text}))
+                    })
+                    .collect();
+                Ok(json!({
+                    "session_id": sess.id, "scope": sess.scope, "movie_id": sess.movie_id,
+                    "title": sess.title, "message_count": msgs.len(), "messages": msgs
+                }))
+            }
+            None => Err("会话不存在".into()),
+        };
+    }
+    // 列表级
+    let mut conds = Vec::new();
+    let mut vals: Vec<SqlVal> = Vec::new();
+    if let Some(mid) = get_i64(args, "movie_id") {
+        conds.push("movie_id = ?".to_string());
+        vals.push(SqlVal::Int(mid));
+    }
+    if let Some(eid) = get_str(args, "entry_id") {
+        conds.push("entry_id = ?".to_string());
+        vals.push(SqlVal::Text(eid.to_string()));
+    }
+    if let Some(rid) = get_str(args, "review_id") {
+        conds.push("review_id = ?".to_string());
+        vals.push(SqlVal::Text(rid.to_string()));
+    }
+    let where_clause = if conds.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conds.join(" AND "))
+    };
+    let limit = get_i64(args, "limit").unwrap_or(20).clamp(1, 50);
+    vals.push(SqlVal::Int(limit));
+    let sql = format!(
+        "SELECT id, scope, movie_id, entry_id, review_id, title, created_at, last_message_at
+         FROM chat_sessions {where_clause} ORDER BY last_message_at DESC LIMIT ?"
+    );
+    let rows = ctx
+        .db
+        .select_json_params(sql, vals)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({"count": rows.len(), "chats": rows}))
 }
 
 /// 清单维护（v0 §5.1 规格；确认门内）。List 变更不落账（非影片状态断言）。
@@ -1597,6 +1715,7 @@ mod write_regression_tests {
             config: Config::default_for_test(),
             source: "agent",
             confirm: None,
+            sessions: None,
         };
         (db, ctx)
     }

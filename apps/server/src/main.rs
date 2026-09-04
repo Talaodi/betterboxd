@@ -176,6 +176,7 @@ fn tool_ctx(app: &App) -> ToolCtx {
         config: (*app.config.lock().unwrap()).clone(),
         confirm: None, // REST = 用户明确意图
         source: "edit", // GUI/REST = 用户直接操作（审计区分 AI 写入）
+        sessions: Some(app.sessions.clone()),
     }
 }
 
@@ -1354,6 +1355,7 @@ async fn handle_chat(
         let db = app.db.clone();
         let stats_db = app.stats_db.clone();
         let pending = app.pending.clone();
+        let sessions_store = app.sessions.clone();
         let pname = app.profile_name.lock().unwrap().clone();
         let pmodel = app.profile_model.lock().unwrap().clone();
         let mut run_handle = tokio::spawn(async move {
@@ -1368,6 +1370,7 @@ async fn handle_chat(
                     cancel: token.clone(),
                 })),
                 source: "agent",
+                sessions: Some(sessions_store),
             };
             let tx_ev = tx_task.clone();
             let on_event = move |ev: agent::AgentEvent| {
