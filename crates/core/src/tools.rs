@@ -431,8 +431,9 @@ async fn lookup_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     }
     if let Some(t) = get_str(args, "title") {
         let pat = format!("%{}%", t);
-        conds.push("(title LIKE ? OR title_main LIKE ? OR title_en LIKE ?)".to_string());
-        for _ in 0..3 {
+        // v_reviews_full 视图列：title(影评标题)/title_zh/title_en/title_original（无 title_main！）
+        conds.push("(title LIKE ? OR title_zh LIKE ? OR title_en LIKE ? OR title_original LIKE ?)".to_string());
+        for _ in 0..4 {
             vals.push(SqlVal::Text(pat.clone()));
         }
     }
@@ -678,7 +679,10 @@ async fn lookup_taxonomy(ctx: &ToolCtx) -> Result<Value, String> {
 async fn lookup_chats(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     use crate::db::SqlVal;
     // 单会话全文
-    if let Some(sid) = get_str(args, "session_id").map(String::from) {
+    if let Some(sid) = get_str(args, "session_id")
+        .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        .map(String::from)
+    {
         let Some(store) = &ctx.sessions else {
             return Err("当前路径无会话存储，仅支持列表级查询".into());
         };

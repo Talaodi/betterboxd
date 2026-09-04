@@ -402,6 +402,9 @@ pub async fn opening_message(
             &mut emit,
         )
         .await?;
+    if o.interrupted {
+        return Err("开场白已取消".into());
+    }
     let usage = (
         o.usage.as_ref().and_then(|u| u.prompt_tokens).unwrap_or(0),
         o.usage.as_ref().and_then(|u| u.completion_tokens).unwrap_or(0),

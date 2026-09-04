@@ -1135,9 +1135,13 @@ async fn handle_chat(
             "SELECT * FROM v_reviews_full WHERE review_id='{}'", rid.replace('\'', "")
         )).await
             && let Some(r) = rows.first() {
+                let y = chrono::DateTime::from_timestamp(r["created_at"].as_i64().unwrap_or(0), 0)
+                    .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+                    .unwrap_or_default();
+                let _ = &y;
                 ctx_parts.push(format!(
-                    "讨论对象：一篇影评——\n影片: {}（{}）\n影评标题: {}\n署名评分: {}\n写作时间: {}\n正文:\n{}",
-                    r["title_zh"].as_str().or(r["title_main"].as_str()).unwrap_or("?"),
+                    "讨论对象：一篇影评——\n影片: {}（题材: {}）\n影评标题: {}\n署名评分: {}\n写作时间: {}\n正文:\n{}",
+                    r["title_zh"].as_str().or(r["title_en"].as_str()).unwrap_or("?"),
                     r["genres"].as_str().unwrap_or(""),
                     r["title"].as_str().unwrap_or("（无题）"),
                     r["rating"].as_i64().map(|x| format!("{x}/100")).unwrap_or("未评".into()),
@@ -1209,6 +1213,8 @@ async fn handle_chat(
             let db = app.db.clone();
             let cfg = app.config.lock().unwrap().clone();
             let ctx_inj = context_injection.clone();
+            let pname = app.profile_name.lock().unwrap().clone();
+            let pmodel = app.profile_model.lock().unwrap().clone();
             let token = CancellationToken::new();
             *cancel.lock().unwrap() = Some(token.clone());
             let mut cur = current.clone();
@@ -1234,18 +1240,24 @@ async fn handle_chat(
                             cur.title = "开场讨论".to_string();
                         }
                         let _ = sessions.save(&cur).await;
-                        let _ = db
+                        // 开场白同样计 usage：对齐正常路径的 7 参数（pname/pmodel 非空串）
+                        let sid = cur.id.clone();
+                        let db2 = db.clone();
+                        let (op_pname, op_pmodel) = (pname.clone(), pmodel.clone());
+                        let _ = db2
                             .call(move |c| {
                                 c.execute(
                                     "INSERT INTO usage_records (id, session_id, profile_name,
                                    model, prompt_tokens, completion_tokens, at, kind)
-                                 VALUES (?1,'',?2,?3,?4,?5,?6,'llm')",
+                                 VALUES (?1,?2,?3,?4,?5,?6,?7,'llm')",
                                     rusqlite::params![
                                         uuid::Uuid::now_v7().to_string(),
-                                        "",
-                                        betterboxd_core::now(),
+                                        sid,
+                                        op_pname,
+                                        op_pmodel,
                                         pt as i64,
-                                        ct as i64
+                                        ct as i64,
+                                        betterboxd_core::now()
                                     ],
                                 )
                             })
@@ -1253,6 +1265,14 @@ async fn handle_chat(
                         let _ = tx_o.send(Message::Text(
                             serde_json::json!({"type": "done", "interrupted": false,
                                 "steps": 1, "tokens": {"prompt": pt, "completion": ct}})
+                            .to_string()
+                            .into(),
+                        ));
+                    }
+                    Err(e) if e.contains("已取消") => {
+                        let _ = tx_o.send(Message::Text(
+                            serde_json::json!({"type": "done", "interrupted": true,
+                                "steps": 1, "tokens": {"prompt": 0, "completion": 0}})
                             .to_string()
                             .into(),
                         ));

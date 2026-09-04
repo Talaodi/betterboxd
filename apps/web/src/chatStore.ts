@@ -49,6 +49,8 @@ type Store = {
   freshPending: boolean;
   /** 最近一次连接使用的 scope（freshPending 重连时复用） */
   lastScope?: ChatScope;
+  /** 开场白阶段（P4）：fresh 连接 hello 后、首个 done 前；期间禁发消息防丢 */
+  opening: boolean;
   listeners: Set<() => void>;
 };
 
@@ -90,6 +92,7 @@ function getStore(key: string): Store {
       pendingConfirm: null,
       sessionId: "",
       freshPending: false,
+      opening: false,
       listeners: new Set(),
     };
     stores.set(key, s);
@@ -104,6 +107,8 @@ function handleFrame(s: Store, key: string, f: Frame) {
     case "hello": {
       s.sessionId = f.session_id ?? "";
       s.freshPending = false;
+      // fresh 新会话：服务端会发开场白（恢复的会话没有）
+      s.opening = s.freshPending && s.messages.length === 0;
       // 历史恢复：内存为空时拉取该会话消息（刷新/重开抽屉后回填）
       if (s.sessionId && s.messages.length === 0) {
         fetch(`/api/chats/${s.sessionId}`)
@@ -168,6 +173,7 @@ function handleFrame(s: Store, key: string, f: Frame) {
     }
     case "done":
       s.streaming = false;
+      s.opening = false;
       {
         // 评审缺陷 24：打断/无文本时也要收口——空进度行丢弃，有文本转正式气泡
         const last = s.messages[s.messages.length - 1];
@@ -186,6 +192,7 @@ function handleFrame(s: Store, key: string, f: Frame) {
       break;
     case "error":
       s.streaming = false;
+      s.opening = false;
       s.messages = [
         ...s.messages,
         { role: "assistant", text: `⚠ ${f.message}`, final: true },
@@ -288,7 +295,7 @@ export function useChat(scope?: ChatScope) {
   const sendUser = useCallback(
     (text: string) => {
       const s = getStore(key);
-      if (!s.ws || s.ws.readyState !== WebSocket.OPEN || s.streaming) return;
+      if (!s.ws || s.ws.readyState !== WebSocket.OPEN || s.streaming || s.opening) return;
       s.messages = [...s.messages, { role: "user", text }];
       s.acc = "";
       s.streaming = true;
@@ -329,6 +336,7 @@ export function useChat(scope?: ChatScope) {
     messages: s.messages,
     connected: s.connected,
     streaming: s.streaming,
+    opening: s.opening,
     pendingConfirm: s.pendingConfirm,
     sessionId: s.sessionId,
     sendUser,

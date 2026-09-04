@@ -52,7 +52,7 @@ export default function ChatPanel({
       ? { movieId, entryId, reviewId, sessionId, freshKey }
       : undefined,
   );
-  const { messages, connected, streaming, pendingConfirm, sendUser, interrupt, resolveConfirm } =
+  const { messages, connected, streaming, opening, pendingConfirm, sendUser, interrupt, resolveConfirm } =
     chat;
   const [input, setInput] = useState("");
 
@@ -69,7 +69,7 @@ export default function ChatPanel({
 
   const send = useCallback(() => {
     const text = input.trim();
-    if (!text || streaming || !connected) return;
+    if (!text || streaming || !connected || opening) return;
     sendUser(text);
     setInput("");
   }, [input, streaming, connected, sendUser]);
@@ -172,6 +172,9 @@ export default function ChatPanel({
       )}
 
       {/* 输入行 */}
+      {opening && (
+        <p className="mt-1 text-xs text-[#5a6b7c]">助手正在开场，稍候…（可点「停止」打断）</p>
+      )}
       <div className="mt-3 flex gap-2">
         <input
           className="flex-1 rounded-lg border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm outline-none focus:border-[#40bcf4]"
@@ -179,9 +182,16 @@ export default function ChatPanel({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
           placeholder={placeholder}
-          disabled={streaming || !connected}
+          disabled={streaming || !connected || opening}
         />
-        {streaming ? (
+        {opening ? (
+          <button
+            className="rounded-lg bg-[#ff8000] px-4 py-2 text-sm font-medium text-[#1a1206]"
+            onClick={interrupt}
+          >
+            停止
+          </button>
+        ) : streaming ? (
           <button
             className="rounded-lg bg-[#ff8000] px-4 py-2 text-sm font-medium text-[#1a1206]"
             onClick={interrupt}
