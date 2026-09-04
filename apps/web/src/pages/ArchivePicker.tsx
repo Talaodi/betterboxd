@@ -11,46 +11,50 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
   const [switching, setSwitching] = useState(false);
   const [browser, setBrowser] = useState<{ mode: "new" | "register"; path: string; name: string } | null>(null);
   const [fs, setFs] = useState<FsList | null>(null);
+  const [targetDir, setTargetDir] = useState<string>("");
 
   const reload = () => getJson<typeof archives>("/api/archives").then(setArchives);
   useEffect(() => {
     reload();
-    // 切换到新存档（server 重启中）：轮询 health 直到恢复 → reload 页面
+  }, []);
+
+  // 切换轮询：仅 switching=true（发起激活/新建重启）期间运行；当前目录变为目标目录 → reload。
+  // 注意：此效应不可在挂载时无条件轮询——那会把「进入当前」也误判成重启完成（导致无限刷新）。
+  useEffect(() => {
+    if (!switching) return;
+    const target = targetDir;
     const start = Date.now();
     const timer = setInterval(() => {
       fetch("/api/archives")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d && d.current) {
+          if (d && d.current && d.current === target) {
             clearInterval(timer);
-            setSwitching(false);
             window.location.reload();
           }
         })
         .catch(() => {});
       if (Date.now() - start > 30000) clearInterval(timer);
     }, 800);
-    const t = setTimeout(() => clearInterval(timer), 31000);
-    return () => {
-      clearInterval(timer);
-      clearTimeout(t);
-    };
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [switching]);
 
   const pick = async (a: Archive) => {
     if (switching) return;
-    setSwitching(true);
-    sessionStorage.setItem("bb-archive-picked", "1");
     if (archives && a.dir === archives.current) {
+      sessionStorage.setItem("bb-archive-picked", "1");
       onPicked();
       return;
     }
+    sessionStorage.setItem("bb-archive-picked", "1");
+    setSwitching(true);
+    setTargetDir(a.dir);
     try {
       await sendJson("/api/archives/register", "POST", { dir: a.dir, name: a.name });
-      // server 重启中：上面轮询兜底
     } catch (e) {
       setSwitching(false);
+      setTargetDir("");
       alert(`切换失败: ${(e as Error).message}`);
     }
   };
@@ -70,12 +74,15 @@ export default function ArchivePicker({ onPicked }: { onPicked: () => void }) {
     if (!browser || !fs) return;
     if (browser.mode === "new") {
       if (!browser.name || !fs.current) return alert("需要存档名");
-      setSwitching(true);
+      const dir = `${fs.current.replace(/[\\/]$/, "")}/${browser.name}`;
       sessionStorage.setItem("bb-archive-picked", "1");
+      setSwitching(true);
+      setTargetDir(dir);
       try {
         await sendJson("/api/archives/create", "POST", { name: browser.name, parent_dir: fs.current });
       } catch (e) {
         setSwitching(false);
+        setTargetDir("");
         alert(`新建失败: ${(e as Error).message}`);
       }
     } else {
