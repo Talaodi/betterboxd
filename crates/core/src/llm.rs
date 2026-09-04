@@ -312,11 +312,34 @@ impl ChatClient {
                 .json(&body)
                 .send() => r.map_err(|e| format!("LLM 网络错误: {e}"))?,
         };
-        if !resp.status().is_success() {
+        let resp = if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(format!("LLM HTTP {status}: {}", truncate(&body, 300)));
-        }
+            // 兼容兜底: 严格 OpenAI 兼容端(OpenAI 官方)对未知的 thinking/reasoning_effort 返回 400
+            let has_thinking = body.get("thinking").is_some() || body.get("reasoning_effort").is_some();
+            if status.as_u16() == 400 && has_thinking {
+                body.as_object_mut().unwrap().remove("thinking");
+                body.as_object_mut().unwrap().remove("reasoning_effort");
+                let resp = tokio::select! {
+                    _ = cancel.cancelled() => return Ok(Outcome { interrupted: true, ..Default::default() }),
+                    r = self.http
+                        .post(format!("{}/chat/completions", self.endpoint))
+                        .bearer_auth(&self.api_key)
+                        .json(&body)
+                        .send() => r.map_err(|e| format!("LLM 网络错误: {e}"))?,
+                };
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(format!("LLM HTTP {status}: {}", truncate(&body, 300)));
+                }
+                resp
+            } else {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(format!("LLM HTTP {status}: {}", truncate(&body, 300)));
+            }
+        } else {
+            resp
+        };
 
         let mut out = Outcome::default();
         let mut buf = SseBuffer::default();

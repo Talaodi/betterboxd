@@ -252,10 +252,15 @@ pub async fn run(
             if let Some(m) = p.max_output_tokens {
                 sampling["max_tokens"] = json!(m);
             }
-            // 思考模式与强度（openai 兼容: thinking + reasoning_effort; 模型不支持时忽略）
+            // 思考模式与强度（openai 兼容: thinking + reasoning_effort）
             if p.thinking_mode == "on" {
                 sampling["thinking"] = json!({"type": "enabled"});
-                if let Some(eff) = &p.thinking_strength {
+                // 值域兜底: 手改 config.toml 可能非法(low/high/max 之外)
+                if let Some(eff) = p
+                    .thinking_strength
+                    .as_deref()
+                    .filter(|s| matches!(*s, "low" | "high" | "max"))
+                {
                     sampling["reasoning_effort"] = json!(eff);
                 }
             }
@@ -487,7 +492,13 @@ pub async fn opening_message(
     let mut extra = json!({});
     if _config.active().map(|p| p.thinking_mode == "on").unwrap_or(false) {
         extra["thinking"] = json!({"type": "enabled"});
-        if let Some(eff) = _config.active().ok().and_then(|p| p.thinking_strength.clone()) {
+        // 值域兜底: 手改 config.toml 可能非法(low/high/max 之外)
+        if let Some(eff) = _config
+            .active()
+            .ok()
+            .and_then(|p| p.thinking_strength.clone())
+            .filter(|s| matches!(s.as_str(), "low" | "high" | "max"))
+        {
             extra["reasoning_effort"] = json!(eff);
         }
     }

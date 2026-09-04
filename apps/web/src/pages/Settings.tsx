@@ -73,11 +73,12 @@ export default function Settings() {
   };
   const saveDraft = () => {
     if (!draft || !editing) return;
-    const ps = editing.isNew ? [...config.profiles, draft] : config.profiles.map((p, j) => (j === editing.index ? draft : p));
+    const draft2 = { ...draft, thinking_strength: draft.thinking_strength ?? "high" };
+    const ps = editing.isNew ? [...config.profiles, draft2] : config.profiles.map((p, j) => (j === editing.index ? draft2 : p));
     setEditing(null);
     setDraft(null);
     // 首次创建配置自动启用（无活动配置时），避免保存后忘记切换
-    const active = editing.isNew && !config.active_profile ? draft.name : config.active_profile;
+    const active = editing.isNew && !config.active_profile ? draft2.name : config.active_profile;
     save({ ...config, profiles: ps, active_profile: active });
   };
 
@@ -93,7 +94,7 @@ export default function Settings() {
   const delProfile = (i: number) => {
     const victim = config.profiles[i];
     if (!victim) return;
-    if (!window.confirm(`删除配置「${victim.name}」？`)) return;
+    if (!window.confirm(`Delete profile "${victim.name}"?`)) return;
     const rest = config.profiles.filter((_, j) => j !== i);
     // 删除活动配置 → active_profile 交接（下一个或清空），否则 active() 失败致 client None
     const active =
@@ -125,7 +126,7 @@ export default function Settings() {
                       className={"rounded px-2 py-0.5 text-xs " + (config.active_profile === p.name ? "bg-[#00e054] text-[#0c1a10]" : "text-[#5a6b7c] hover:text-white")}
                       onClick={() => setActive(p.name)}
                     >
-                      {config.active_profile === p.name ? "✓ 当前" : "切换"}
+                      {config.active_profile === p.name ? "● Active" : "Switch"}
                     </button>
                     <button className="text-xs text-[#40bcf4] hover:underline" onClick={() => openEdit(i)}>Edit</button>
                     <button className="text-xs text-[#ff8000] hover:underline" onClick={() => delProfile(i)}>Delete</button>
@@ -215,7 +216,7 @@ export default function Settings() {
                   <option value="max">Max</option>
                 </select>
               </label>
-              <label className="text-xs text-[#8899aa]">温度 Temperature
+              <label className="text-xs text-[#8899aa]">Temperature
                 <input type="number" step="0.1" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.temperature ?? ""}
                   onChange={(e) => setDraft({ ...draft, temperature: e.target.value === "" ? null : Number(e.target.value) })} />
               </label>
@@ -252,7 +253,7 @@ export default function Settings() {
               </label>
               <label className="text-[#8899aa]">Budget (by cache; stops when reached)
                 <input type="number" step="0.01" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.budget ?? ""}
-                  onChange={(e) => setDraft({ ...draft, budget: e.target.value === "" ? null : Number(e.target.value) })} placeholder="不填=不限" />
+                  onChange={(e) => setDraft({ ...draft, budget: e.target.value === "" ? null : Number(e.target.value) })} placeholder="empty = unlimited" />
               </label>
             </div>
             <p className="mt-2 text-[10px] text-[#5a6b7c]">
