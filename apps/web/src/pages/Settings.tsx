@@ -76,7 +76,9 @@ export default function Settings() {
     const ps = editing.isNew ? [...config.profiles, draft] : config.profiles.map((p, j) => (j === editing.index ? draft : p));
     setEditing(null);
     setDraft(null);
-    save({ ...config, profiles: ps });
+    // 首次创建配置自动启用（无活动配置时），避免保存后忘记切换
+    const active = editing.isNew && !config.active_profile ? draft.name : config.active_profile;
+    save({ ...config, profiles: ps, active_profile: active });
   };
 
   const resetUsage = async (name: string) => {
