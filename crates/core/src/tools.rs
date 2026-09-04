@@ -107,7 +107,7 @@ pub fn registry() -> ToolRegistry {
             },
             ToolMeta {
                 name: "lookup_reviews",
-                description: "按条件检索我的影评（含正文 body_md，单条截断 2000 字符；最多 20 条）。写影评前可参考既有影评；主题/风格类主观分析请用本工具取样阅读。",
+                description: "按条件检索我的影评（含正文 body_md 全文；最多 20 条，offset 翻页）。写影评前可参考既有影评；主题/风格类主观分析请用本工具取样阅读。",
                 parameters: obj_schema(
                     json!({
                         "movie_id": {"type": "integer"},
@@ -397,7 +397,7 @@ async fn lookup_diary(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     Ok(json!({"count": rows.len(), "rows": rows}))
 }
 
-/// 检索影评（对称 lookup_diary）：title 关键词/movie_id/liked 过滤，含 body_md（单条截断 2000 字符）。
+/// 检索影评（对称 lookup_diary）：title 关键词/movie_id/liked 过滤，body_md 全文返回。
 async fn lookup_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
     use crate::db::SqlVal;
     let mut conds = Vec::new();
@@ -437,22 +437,7 @@ async fn lookup_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
         .select_json_params(sql, vals)
         .await
         .map_err(|e| e.to_string())?;
-    // body_md 截断（防止单条长影评挤爆工具载荷）
-    let rows: Vec<Value> = rows
-        .into_iter()
-        .map(|mut r| {
-            if let Some(b) = r["body_md"].as_str()
-                && b.len() > 2000 {
-                    let mut cut = 2000;
-                    while cut > 0 && !b.is_char_boundary(cut) {
-                        cut -= 1;
-                    }
-                    r["body_md"] = json!(format!("{}…[截断，body_len={}]",
-                        &b[..cut], r["body_len"].as_i64().unwrap_or(0)));
-                }
-            r
-        })
-        .collect();
+    // body_md 全文返回（用户裁定：大多数影评不足 2000 字符，截断只有损失没有收益）
     Ok(json!({"count": rows.len(), "rows": rows}))
 }
 
