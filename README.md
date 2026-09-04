@@ -14,13 +14,26 @@ Betterboxd 是专为影迷开发的综合助手, 本身不仅是一个完善且�
 | 工具 | 版本 |
 |---|---|
 | Rust | ≥ 1.85 |
-| Node.js | ≥ 18 | 构建前端用；`npm install && npm run build` |
-| npm | ≥ 9 | |
-| C 编译器 | 任选其一 | rusqlite 使用 `bundled` 特性（自带 SQLite 源码编译）——Windows 需 [MSVC Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 或 MinGW；macOS 直接使用系统 Xcode Command Line Tools；Linux 一般自带 |
+| Node.js | ≥ 18 |
+| npm | ≥ 9 |
+| C 编译器 | 任选其一 |
 
 **跨平台**：Windows / macOS / Linux（含 WSL2）均可编译运行。没有平台专属代码；整个仓库可编译为原生二进制。运行约束见「四、运行」。
 
-## 构建
+## 构建（推荐脚本，自动完成前端 + 后端）
+
+```bash
+# Linux / macOS（终端）
+./build.sh                # 或 ./build.sh --release 出优化二进制
+
+# macOS（Finder 双击）
+./build.command
+
+# Windows（双击或命令行运行）
+build.bat                 # 或 build.bat --release
+```
+
+等价手动步骤：
 
 ```bash
 # 1) 前端
