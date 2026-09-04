@@ -30,4 +30,6 @@ cargo build                # 产物 target/debug/betterboxd-server
 
 ## 快速开始
 
-项目提供了 ./example 作为样例数据展示各项功能, 可自行载入查看或前往 [QUICK_START.md](./docs/QUICK_START.md) 查看各项功能.
+项目提供了 ./example 作为样例数据展示各项功能, 可自行载入存档.
+
+前往 [QUICK_START.md](./docs/QUICK_START.md) 查看各项功能.
