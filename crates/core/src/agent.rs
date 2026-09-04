@@ -490,16 +490,14 @@ pub async fn opening_message(
         })
     };
     let mut extra = json!({});
-    if _config.active().map(|p| p.thinking_mode == "on").unwrap_or(false) {
-        extra["thinking"] = json!({"type": "enabled"});
-        // 值域兜底: 手改 config.toml 可能非法(low/high/max 之外)
-        if let Some(eff) = _config
-            .active()
-            .ok()
-            .and_then(|p| p.thinking_strength.clone())
-            .filter(|s| matches!(s.as_str(), "low" | "high" | "max"))
-        {
-            extra["reasoning_effort"] = json!(eff);
+    if let Ok(p) = _config.active() {
+        if p.thinking_mode == "on" {
+            extra["thinking"] = json!({"type": "enabled"});
+            // 值域兜底: 手改 config.toml 可能非法(low/high/max 之外)
+            if let Some(eff) = p.thinking_strength.clone().filter(|s| matches!(s.as_str(), "low" | "high" | "max"))
+            {
+                extra["reasoning_effort"] = json!(eff);
+            }
         }
     }
     let o = client
