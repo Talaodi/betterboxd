@@ -264,6 +264,8 @@ function connect(key: string, scope?: ChatScope) {
   const s = getStore(key);
   if (s.ws && s.ws.readyState <= WebSocket.OPEN) return;
   s.lastScope = scope;
+  // fresh 新会话：握手前掉线重连需保持 fresh=1（否则会恢复到旧 global 会话）
+  s.freshPending = Boolean(scope?.freshKey);
   const proto = location.protocol === "https:" ? "wss" : "ws";
   let qs = "";
   if (scope?.sessionId) {

@@ -423,7 +423,7 @@ fn insert_entry(conn: &Connection, movie_id: i64, e: &EntryPlan) -> String {
     )
     .unwrap();
     for (dim, name) in e.dims {
-        let vid = ensure_pool(conn, dim, name);
+        let vid = ensure_pool(conn, dim, name).unwrap();
         conn.execute(
             "INSERT INTO entry_dimensions (entry_id, value_id) VALUES (?1,?2)",
             params![id, vid],
@@ -431,7 +431,7 @@ fn insert_entry(conn: &Connection, movie_id: i64, e: &EntryPlan) -> String {
         .unwrap();
     }
     for tag in e.tags {
-        let tid = ensure_tag(conn, tag);
+        let tid = ensure_tag(conn, tag).unwrap();
         conn.execute(
             "INSERT INTO entry_tags (entry_id, tag_id) VALUES (?1,?2)",
             params![id, tid],

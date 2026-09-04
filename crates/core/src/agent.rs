@@ -352,6 +352,7 @@ pub async fn run(
                             "tool_call_id": tc.id.clone(),
                             "content": payload
                         }));
+                        reject_stop_round = true; // 立即结束本轮（拒绝≠失败, 不再让模型重试）
                         break;
                     }
                     // 严格"同工具连续失败"：成功或换工具都重置

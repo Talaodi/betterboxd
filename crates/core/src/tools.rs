@@ -1143,7 +1143,7 @@ fn ensure_dims(conn: &Connection, entry_id: &str, dims: &Value) -> rusqlite::Res
                     "维度值必须是字符串",
                 )))
             })?;
-            let vid = ensure_pool(conn, dim, name);
+            let vid = ensure_pool(conn, dim, name)?;
             conn.execute(
                 "INSERT INTO entry_dimensions (entry_id, value_id) VALUES (?1,?2)",
                 params![entry_id, vid],
@@ -1161,7 +1161,7 @@ fn ensure_tag_list(conn: &Connection, entry_id: &str, tags: &Value) -> rusqlite:
                 "标签必须是字符串",
             )))
         })?;
-        let tid = ensure_tag(conn, name);
+        let tid = ensure_tag(conn, name)?;
         conn.execute(
             "INSERT INTO entry_tags (entry_id, tag_id) VALUES (?1,?2)",
             params![entry_id, tid],
@@ -1172,7 +1172,8 @@ fn ensure_tag_list(conn: &Connection, entry_id: &str, tags: &Value) -> rusqlite:
 }
 
 /// 维度值池：取现有 id 或创建新值（录入补全/写工具/种子共用）。
-pub fn ensure_pool(conn: &Connection, dim: &str, name: &str) -> String {
+/// 返回 Result：并发建值冲突/DB 错误经调用方 ? 传播，不 panic（DB 线程 panic 会瘫痪全库）。
+pub fn ensure_pool(conn: &Connection, dim: &str, name: &str) -> rusqlite::Result<String> {
     let existing: Option<String> = conn
         .query_row(
             "SELECT id FROM dimension_values WHERE dimension=?1 AND name=?2",
@@ -1180,33 +1181,33 @@ pub fn ensure_pool(conn: &Connection, dim: &str, name: &str) -> String {
             |r| r.get(0),
         )
         .ok();
-    existing.unwrap_or_else(|| {
-        let id = uuid::Uuid::now_v7().to_string();
-        conn.execute(
-            "INSERT INTO dimension_values (id, dimension, name) VALUES (?1,?2,?3)",
-            params![id, dim, name],
-        )
-        .unwrap();
-        id
-    })
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    let id = uuid::Uuid::now_v7().to_string();
+    conn.execute(
+        "INSERT INTO dimension_values (id, dimension, name) VALUES (?1,?2,?3)",
+        params![id, dim, name],
+    )?;
+    Ok(id)
 }
 
 /// 自由标签：取现有 id 或创建。
-pub fn ensure_tag(conn: &Connection, name: &str) -> String {
+pub fn ensure_tag(conn: &Connection, name: &str) -> rusqlite::Result<String> {
     let existing: Option<String> = conn
         .query_row("SELECT id FROM tags WHERE name=?1", params![name], |r| {
             r.get(0)
         })
         .ok();
-    existing.unwrap_or_else(|| {
-        let id = uuid::Uuid::now_v7().to_string();
-        conn.execute(
-            "INSERT INTO tags (id, name) VALUES (?1,?2)",
-            params![id, name],
-        )
-        .unwrap();
-        id
-    })
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    let id = uuid::Uuid::now_v7().to_string();
+    conn.execute(
+        "INSERT INTO tags (id, name) VALUES (?1,?2)",
+        params![id, name],
+    )?;
+    Ok(id)
 }
 
 /// 影片级断言 + 状态重算（写路径统一出口）。
@@ -1618,6 +1619,7 @@ async fn manage_reviews(ctx: &ToolCtx, args: &Value) -> Result<Value, String> {
             let review_id = get_str(&args, "review_id")
                 .ok_or("缺少 review_id")?
                 .to_string();
+            let del_src = ctx.source;
             ctx.db
                 .call(move |c| {
                     let tx = c.unchecked_transaction()?;

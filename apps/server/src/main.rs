@@ -1679,9 +1679,7 @@ async fn config_get(State(app): State<App>) -> Response {
     if let Some(profiles) = v.get_mut("profiles").and_then(|p| p.as_array_mut()) {
         for p in profiles {
             if let Some(key) = p.get_mut("api_key").and_then(|k| k.as_str()) {
-                let masked = if key.len() > 8 {
-                    format!("{}...{}", &key[..4], &key[key.len()-4..])
-                } else { "****".into() };
+                let masked = mask_key(key);
                 p["api_key"] = json!(masked);
             }
         }
@@ -2148,10 +2146,11 @@ async fn movie_display_title(db: &DbHandle, mid: Option<i64>) -> String {
 
 /// 掩码（api_key 展示/回填判定共用；与 config_get 掩码格式一致）。
 fn mask_key(k: &str) -> String {
-    if k.len() <= 8 {
+    let chars: Vec<char> = k.chars().collect();
+    if chars.len() <= 8 {
         "****".to_string()
     } else {
-        format!("{}...{}", &k[..4], &k[k.len() - 4..])
+        format!("{}...{}", chars[..4].iter().collect::<String>(), chars[chars.len() - 4..].iter().collect::<String>())
     }
 }
 
