@@ -337,7 +337,7 @@ pub async fn run(
                 // —— 逐张确认卡（用户裁定: 一张一张确认即可, 不用批量卡）——
                 // 拒绝=立即结束本轮（不把拒绝当失败重试, 也不让模型下一轮继续撞墙）。
                 let mut reject_stop_round = false;
-                for tc in &o.tool_calls {
+                for (i, tc) in o.tool_calls.iter().enumerate() {
                     // —— 单工具（读 + 单写卡）原逻辑 ——
                     let args: Value = serde_json::from_str(&tc.arguments).unwrap_or(json!({}));
                     on_event(AgentEvent {
@@ -364,6 +364,14 @@ pub async fn run(
                             "tool_call_id": tc.id.clone(),
                             "content": payload
                         }));
+                        // 历史合法性: assistant 的每个 tool_call 必须有 tool 响应, 否则下一轮 400
+                        for t2 in o.tool_calls[i + 1..].iter() {
+                            messages.push(json!({
+                                "role": "tool",
+                                "tool_call_id": t2.id.clone(),
+                                "content": "skipped: 前面的工具被用户拒绝, 本轮已结束"
+                            }));
+                        }
                         reject_stop_round = true; // 立即结束本轮（拒绝≠失败, 不再让模型重试）
                         break;
                     }
@@ -418,8 +426,15 @@ pub async fn run(
                     }
                 }
                 if reject_stop_round {
-                    // 用户拒绝: 本轮结束（正常结束, 不报错）, 下轮对话由用户主导
-                    break;
+                    // 用户拒绝: 本轮正常结束（不算中断/失败）, 下轮对话由用户主导;
+                    // 不走 437 的"最大步数"误报路径
+                    return Ok(RunSummary {
+                        steps,
+                        interrupted: false,
+                        usage_tokens: (prompt_total, completion_total),
+                        usage_cache: (cache_hit, cache_miss),
+                        aborted_reason: None,
+                    });
                 }
             }
         }

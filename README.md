@@ -32,6 +32,8 @@ cd ../..
 cargo build                # 产物 target/debug/betterboxd-server
 ```
 
+若 `npm install` 运行较慢可使用代理 (一般一分钟).
+
 运行:
 
 ```bash
@@ -45,5 +47,7 @@ cargo build                # 产物 target/debug/betterboxd-server
 界面截图见 `./pictures/` (按功能命名: diary-list / reviews-list / films-grid / movie-detail / search-results / lists-overview / list-detail / stats-page / settings-config / chat-stats-saved-query 等).
 
 项目提供了 `./example/` 作为样例数据展示各项功能, 可自行载入存档. 该存档已经删除各项 API Key 的配置, 记得手动去配置一下. 该存档专为展示功能而构造, 其内容不能代表作者的想法.
+
+该存档默认已经超出了预算限制, 可调高预算或者 Reset.
 
 前往 [QUICK_START.md](./docs/QUICK_START.md) 查看各项功能.

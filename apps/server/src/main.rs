@@ -2327,8 +2327,9 @@ async fn main() {
         .with_state(app);
 
     // 默认只监听回环（评审缺陷 9）：私密随记不应对局域网开放
-    let addr: SocketAddr = "127.0.0.1:3000".parse().unwrap();
-    println!("Betterboxd server: http://localhost:3000");
+    let port: u16 = std::env::var("BB_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    println!("Betterboxd server: http://localhost:{port}");
     // 存档切换重启：旧进程 400ms 后才退出，子进程启动时可能端口未释放 → 重试绑定（≤6 秒）
     let mut listener = None;
     for _ in 0..15 {
