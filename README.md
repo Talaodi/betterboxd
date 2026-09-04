@@ -41,6 +41,7 @@ cargo build                # 产物 target/debug/betterboxd-server
 ```
 
 浏览器打开 http://localhost:3000 (若在 WSL2 内构建也可选择使用 Windows 的浏览器打开).
+如需并行测试实例, 可用环境变量改端口: `BB_PORT=3010 ./target/debug/betterboxd-server` (默认 3000).
 
 ## 快速开始
 

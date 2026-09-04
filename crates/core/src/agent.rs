@@ -336,7 +336,9 @@ pub async fn run(
 
                 // —— 逐张确认卡（用户裁定: 一张一张确认即可, 不用批量卡）——
                 // 拒绝=立即结束本轮（不把拒绝当失败重试, 也不让模型下一轮继续撞墙）。
+                // 打断(停止按钮)与拒绝同族: 用户主动动作, 不得误报"熔断"(TOOL_FAIL_BREAKER)。
                 let mut reject_stop_round = false;
+                let mut interrupted_by_cancel = false;
                 for (i, tc) in o.tool_calls.iter().enumerate() {
                     // —— 单工具（读 + 单写卡）原逻辑 ——
                     let args: Value = serde_json::from_str(&tc.arguments).unwrap_or(json!({}));
@@ -348,10 +350,15 @@ pub async fn run(
                     });
                     let result = tools::execute(&tc.name, ctx, args).await;
                     let ok = result.is_ok();
-                    // 用户拒绝 ≠ 工具失败：拒绝立即结束本轮（不累计熔断、不回传错误让模型重试）
+                    // 用户拒绝/打断 ≠ 工具失败：立即结束本轮（不累计熔断、不回传错误让模型重试）
                     let is_reject = !ok
                         && matches!(&result, Err(e) if e.contains("用户拒绝了此操作") || e.contains("批量确认被拒绝"));
-                    if is_reject {
+                    let is_cancel = !ok
+                        && matches!(&result, Err(e) if e.contains("已打断"));
+                    if is_reject || is_cancel {
+                        if is_cancel {
+                            interrupted_by_cancel = true;
+                        }
                         let payload = match &result {
                             Err(e) => json!({"error": e}).to_string(),
                             _ => String::new(),
@@ -369,7 +376,7 @@ pub async fn run(
                             messages.push(json!({
                                 "role": "tool",
                                 "tool_call_id": t2.id.clone(),
-                                "content": "skipped: 前面的工具被用户拒绝, 本轮已结束"
+                                "content": "skipped: 前面的工具被用户中断, 本轮已结束"
                             }));
                         }
                         reject_stop_round = true; // 立即结束本轮（拒绝≠失败, 不再让模型重试）
@@ -426,11 +433,11 @@ pub async fn run(
                     }
                 }
                 if reject_stop_round {
-                    // 用户拒绝: 本轮正常结束（不算中断/失败）, 下轮对话由用户主导;
+                    // 用户拒绝/打断: 本轮正常结束（结束原因如实汇报, 不算引擎故障/中断误报）;
                     // 不走 437 的"最大步数"误报路径
                     return Ok(RunSummary {
                         steps,
-                        interrupted: false,
+                        interrupted: interrupted_by_cancel,
                         usage_tokens: (prompt_total, completion_total),
                         usage_cache: (cache_hit, cache_miss),
                         aborted_reason: None,

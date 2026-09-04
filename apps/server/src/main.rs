@@ -2327,9 +2327,9 @@ async fn main() {
         .with_state(app);
 
     // 默认只监听回环（评审缺陷 9）：私密随记不应对局域网开放
+    // BB_PORT 仅用于并行测试/开发（默认 3000；restart_into 子进程经环境变量继承）
     let port: u16 = std::env::var("BB_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-    println!("Betterboxd server: http://localhost:{port}");
     // 存档切换重启：旧进程 400ms 后才退出，子进程启动时可能端口未释放 → 重试绑定（≤6 秒）
     let mut listener = None;
     for _ in 0..15 {
@@ -2347,7 +2347,12 @@ async fn main() {
             }
         }
     }
-    let listener = listener.expect("端口 3000 持续被占用，无法启动");
+    let listener = listener.expect(&format!("端口 {port} 持续被占用，无法启动"));
+    let shown = listener
+        .local_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| format!("127.0.0.1:{port}"));
+    println!("Betterboxd server: http://{shown}");
     axum::serve(listener, router).await.unwrap();
 }
 
