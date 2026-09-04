@@ -29,7 +29,7 @@ type UsageRow = {
 export default function Settings() {
   const [config, setConfig] = useState<Config | null>(null);
   const [usage, setUsage] = useState<UsageRow[]>([]);
-  const [editing, setEditing] = useState<number | null>(null); // 编辑中的 profile 下标
+  const [editing, setEditing] = useState<{ index: number; isNew: boolean } | null>(null);
   const [draft, setDraft] = useState<Profile | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -57,13 +57,23 @@ export default function Settings() {
   const usg = (n: string) => usage.find((u) => u.profile_name === n);
 
   const openEdit = (i: number) => {
-    setEditing(i);
+    setEditing({ index: i, isNew: false });
     setDraft({ ...config.profiles[i] });
   };
+  const addProfile = () => {
+    // 直接弹出编辑界面（report：不要先加空条目再手动点编辑）
+    setEditing({ index: config.profiles.length, isNew: true });
+    setDraft({
+      name: `配置${config.profiles.length + 1}`, endpoint: "", api_key: "", model: "",
+      context_length: 8192, thinking_mode: "off", temperature: null, top_p: null,
+      max_output_tokens: null, extra_body_json: null,
+      pricing: { input_cached: 0, input_uncached: 0, output_cached: 0, output_uncached: 0 },
+      currency: "CNY", budget: null,
+    });
+  };
   const saveDraft = () => {
-    if (!draft) return;
-    const ps = [...config.profiles];
-    ps[editing!] = draft;
+    if (!draft || !editing) return;
+    const ps = editing.isNew ? [...config.profiles, draft] : config.profiles.map((p, j) => (j === editing.index ? draft : p));
     setEditing(null);
     setDraft(null);
     save({ ...config, profiles: ps });
@@ -78,16 +88,6 @@ export default function Settings() {
     }
   };
   const setActive = (name: string) => save({ ...config, active_profile: name });
-  const addProfile = () => save({
-    ...config,
-    profiles: [...config.profiles, {
-      name: `配置${config.profiles.length + 1}`, endpoint: "", api_key: "", model: "",
-      context_length: 8192, thinking_mode: "off", temperature: null, top_p: null,
-      max_output_tokens: null, extra_body_json: null,
-      pricing: { input_cached: 0, input_uncached: 0, output_cached: 0, output_uncached: 0 },
-      currency: "CNY", budget: null,
-    }],
-  });
   const delProfile = (i: number) => {
     if (!window.confirm(`删除配置「${config.profiles[i].name}」？`)) return;
     save({ ...config, profiles: config.profiles.filter((_, j) => j !== i) });
@@ -145,7 +145,7 @@ export default function Settings() {
       </section>
 
       {/* 编辑弹窗 */}
-      {editing !== null && draft && (
+      {editing && draft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditing(null)}>
           <div className="max-h-[85vh] w-full max-w-[560px] overflow-y-auto rounded-xl border border-[#33414f] bg-[#11151a] p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-3 font-medium">编辑配置</h3>
