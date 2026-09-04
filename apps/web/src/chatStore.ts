@@ -5,6 +5,41 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
+// ===== 确认卡可读化标签（report 切片 30 后：裸 movie_id/list_id/saved_query_id → 名称）=====
+async function fetchMovieName(id: unknown): Promise<string | null> {
+  const r = await fetch(`/api/movie/${id}`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  return (d?.movie?.title_main as string) ?? null;
+}
+async function fetchListName(id: unknown): Promise<string | null> {
+  const r = await fetch(`/api/lists/${id}`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  return (d?.list?.name as string) ?? null;
+}
+async function fetchSqName(id: unknown): Promise<string | null> {
+  const r = await fetch(`/api/saved-queries`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  const q = (d?.queries ?? []).find((x: { id?: string | number }) => String(x.id) === String(id));
+  return (q?.name as string) ?? null;
+}
+function setConfirmLabel(s: Store, id: unknown, fn: (v: unknown) => Promise<string | null>, key: string) {
+  if (!id) return;
+  fn(id)
+    .then((name) => {
+      if (name && s.pendingConfirm) {
+        s.pendingConfirm = {
+          ...s.pendingConfirm,
+          labels: { ...s.pendingConfirm.labels, [key]: name },
+        };
+        notify(s);
+      }
+    })
+    .catch(() => {});
+}
+
 type Frame = {
   type: "hello" | "token" | "tool" | "tool_done" | "confirm" | "done" | "error";
   data?: string;
@@ -39,6 +74,8 @@ export type Pending = {
   name: string;
   args: Record<string, unknown>;
   movieTitle?: string;
+  /** 确认卡可读化标签（异步补充）：movie_name / list_name / sq_name */
+  labels?: Record<string, string>;
 };
 
 type Store = {
@@ -198,6 +235,9 @@ function handleFrame(s: Store, key: string, f: Frame) {
           })
           .catch(() => {});
       }
+      setConfirmLabel(s, args["movie_id"], fetchMovieName, "movie_name");
+      setConfirmLabel(s, args["list_id"], fetchListName, "list_name");
+      setConfirmLabel(s, args["saved_query_id"], fetchSqName, "sq_name");
       break;
     }
     case "done":

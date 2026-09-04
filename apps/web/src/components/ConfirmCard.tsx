@@ -20,6 +20,7 @@ type Pending = {
   name: string;
   args: Record<string, unknown>;
   movieTitle?: string;
+  labels?: Record<string, string>;
 };
 
 type EntryRow = {
@@ -90,6 +91,11 @@ export default function ConfirmCard({
   onConfirm: (args: Record<string, unknown>) => void;
   onReject: () => void;
 }) {
+  // keep: 摘要文案可读化——裸 id 优先用 labels（movie_name/list_name/sq_name）
+  const lbl = (k: string) => pending.labels?.[k];
+  const idOr = (labelKey: string, argsKey: string) =>
+    lbl(labelKey) ?? String(pending.args?.[argsKey] ?? "");
+
   const action = pending.args?.action as string | undefined;
   const isDiary = pending.name === "manage_diary";
   const isReview = pending.name === "manage_reviews";
@@ -263,9 +269,9 @@ export default function ConfirmCard({
       : isReview
         ? "此影评"
         : pending.name === "manage_saved_queries"
-          ? `统计项目「${String(pending.args?.saved_query_id ?? "")}」`
+          ? `统计项目「${pending.labels?.sq_name ?? String(pending.args?.saved_query_id ?? "")}」`
           : isList
-            ? `清单「${String(pending.args?.list_id ?? "")}」`
+            ? `清单「${pending.labels?.list_name ?? String(pending.args?.list_id ?? "")}」`
             : "此对象";
     return (
       <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
@@ -468,8 +474,8 @@ export default function ConfirmCard({
   if (isList) {
     const summary =
       action === "add_item"
-        ? `把影片 ${String(pending.args?.movie_id ?? "")} 加入清单 ${String(pending.args?.list_id ?? "")}`
-        : `把影片 ${String(pending.args?.movie_id ?? "")} 移出清单 ${String(pending.args?.list_id ?? "")}`;
+        ? `把影片「${idOr("movie_name", "movie_id")}」加入清单「${idOr("list_name", "list_id")}」`
+        : `把影片「${idOr("movie_name", "movie_id")}」移出清单「${idOr("list_name", "list_id")}」`;
     return (
       <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
         <p className="mb-3 text-sm font-medium text-[#ff8000]">✎ 待确认 · 修改清单归属</p>
@@ -496,7 +502,7 @@ export default function ConfirmCard({
       <div className="my-2 rounded-lg border border-[#ff8000]/60 bg-[#1f262e] p-4">
         <p className="mb-3 text-sm font-medium text-[#ff8000]">✎ 待确认 · 修改想看状态</p>
         <p className="text-sm text-[#dfe7ef]">
-          {String(pending.args?.movie_id ?? "")} → 想看：{on ? "加入想看" : "移出想看"}
+          「{idOr("movie_name", "movie_id")}」 → 想看：{on ? "加入想看" : "移出想看"}
         </p>
         <div className="mt-3 flex gap-2">
           <button
