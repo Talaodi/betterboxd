@@ -70,7 +70,7 @@ async fn echo_rest(Json(input): Json<EchoIn>) -> impl IntoResponse {
     })
 }
 
-/// 从 spikes/local.env 引导生成库配置（仅开发期一次性）。
+/// 首次运行生成库配置（存在则直接沿用）。
 fn ensure_config(lib_dir: &std::path::Path) -> Config {
     let cfg_path = lib_dir.join("config.toml");
     if cfg_path.exists() {
@@ -130,7 +130,9 @@ fn ensure_config(lib_dir: &std::path::Path) -> Config {
         display: Default::default(),
     };
     cfg.save(&cfg_path).expect("写入 config.toml 失败");
-    println!("已从 spikes/local.env 生成 {}", cfg_path.display());
+    if has_env {
+        println!("已生成初始配置 {}", cfg_path.display());
+    }
     cfg
 }
 

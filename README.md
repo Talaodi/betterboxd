@@ -1,4 +1,6 @@
-# Betterboxd — AI 影迷助手
+# Betterboxd - AI 影迷综合助手
+
+
 
 面向中文影迷的个人观影数据助手：**对话即记录**——对 AI 说「记一下刚看了 XXX，X 分」，自动落库；统计不预置项目，由 AI 现场写 SQL 在只读视图上执行；写操作全部经**可编辑确认卡**后才落库。Rust (axum + rusqlite + 手写 Agent Loop) + React18 + TS + Vite + Tailwind v4。
 

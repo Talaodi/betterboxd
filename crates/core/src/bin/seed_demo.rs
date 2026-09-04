@@ -468,28 +468,12 @@ async fn main() {
     let lib = std::path::Path::new("data/.betterboxd");
     std::fs::create_dir_all(lib).unwrap();
     if !lib.join("config.toml").exists() {
-        // 兜底：直接从 spikes/local.env 合成最小配置（与服务器 ensure_config 一致）
-        let mut kv = std::collections::HashMap::new();
-        if let Ok(raw) = std::fs::read_to_string("spikes/local.env") {
-            for line in raw.lines() {
-                if let Some((k, v)) = line.split_once('=') {
-                    let mut v = v.trim().to_string();
-                    if (v.starts_with('"') && v.ends_with('"') && v.len() >= 2)
-                        || (v.starts_with('\'') && v.ends_with('\'') && v.len() >= 2)
-                    {
-                        v = v[1..v.len() - 1].to_string();
-                    }
-                    if !v.is_empty() {
-                        kv.insert(k.trim().to_string(), v);
-                    }
-                }
-            }
-        }
+        // 最小模板（TMDB Key 需用户先配置——spikes 引导已随目录删除）
         let cfg = Config {
             profiles: vec![],
             active_profile: None,
             tmdb: betterboxd_core::config::TmdbCfg {
-                key: kv.get("TMDB_KEY").cloned().unwrap_or_default(),
+                key: String::new(),
                 proxy: None,
                 language: "zh-CN".into(),
             },
