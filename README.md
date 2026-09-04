@@ -1,15 +1,20 @@
 # Betterboxd - AI 影迷综合助手
 
-本项目作为清华大学程序设计训练 (Rust) 课程的大作业开发, 使用 Opencode + GLM / Deepseek 
+本项目作为清华大学程序设计训练 (Rust) 课程的大作业开发, 目前处于 Demo 阶段, 开发过程使用 Opencode + GLM / Deepseek 辅助.
 
-面向中文影迷的个人观影数据助手：**对话即记录**——对 AI 说「记一下刚看了 XXX，X 分」，自动落库；统计不预置项目，由 AI 现场写 SQL 在只读视图上执行；写操作全部经**可编辑确认卡**后才落库。Rust (axum + rusqlite + 手写 Agent Loop) + React18 + TS + Vite + Tailwind v4。
+Betterboxd 是专为影迷开发的综合助手, 本身不仅是一个完善且成熟的包含 Diary / Review / List 等功能的记录工具, 还结合 AI 综合优化使用体验.
 
-## 环境要求
+本项目使用 TMDB (The Movie Database) 作为数据库, 由其 API 使用规范, API Key 不得公开传播. 为了能够正常使用本项目请自行注册 API Key (免费快捷, 过程约 5 分钟). [注册方式](./docs/About-tmdb-api.md).
 
-| 工具 | 版本 | 说明 |
-|---|---|---|
-| Rust | ≥ 1.85（edition 2024） | `rustc --version` 确认 |
-| Node.js | ≥ 18（建议 LTS） | 构建前端用；`npm install && npm run build` |
+
+## 构建
+
+需要以下环境:
+
+| 工具 | 版本 |
+|---|---|
+| Rust | ≥ 1.85 |
+| Node.js | ≥ 18 | 构建前端用；`npm install && npm run build` |
 | npm | ≥ 9 | |
 | C 编译器 | 任选其一 | rusqlite 使用 `bundled` 特性（自带 SQLite 源码编译）——Windows 需 [MSVC Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) 或 MinGW；macOS 直接使用系统 Xcode Command Line Tools；Linux 一般自带 |
 
