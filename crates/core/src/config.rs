@@ -11,8 +11,8 @@ pub struct Profile {
     #[serde(default = "default_ctx")]
     pub context_length: u64,
     #[serde(default)]
-    pub thinking_mode: String, // off | on | advanced
-    /// 思考强度：预期 reasoning 预算 (tokens)；模型不支持时被忽略
+    pub thinking_mode: String, // off | on
+    /// 思考强度内部表示: 推理预算 tokens (UI 给 low=2000 / high=6000 / max=12000), 模型不支持时忽略
     #[serde(default)]
     pub thinking_budget: Option<u32>,
     pub temperature: Option<f64>,

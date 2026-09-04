@@ -207,12 +207,20 @@ export default function Settings() {
                   onChange={(e) => setDraft({ ...draft, thinking_mode: e.target.value })}>
                   <option value="off">关闭</option>
                   <option value="on">开启</option>
-                  <option value="advanced">开启 (高级)</option>
                 </select>
               </label>
-              <label className="text-xs text-[#8899aa]">思考强度 (推理预算 tokens, 选填)
-                <input type="number" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.thinking_budget ?? ""}
-                  onChange={(e) => setDraft({ ...draft, thinking_budget: e.target.value === "" ? null : Number(e.target.value) })} placeholder="如 2000" />
+              <label className="text-xs text-[#8899aa]">思考强度
+                <select className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm"
+                  value={draft.thinking_budget === null ? "high" : String(draft.thinking_budget)}
+                  disabled={draft.thinking_mode !== "on"}
+                  onChange={(e) => {
+                    const m: Record<string, number | null> = { low: 2000, high: 6000, max: 12000 };
+                    setDraft({ ...draft, thinking_budget: m[e.target.value] ?? null });
+                  }}>
+                  <option value="low">低 (low)</option>
+                  <option value="high">高 (high)</option>
+                  <option value="max">最高 (max)</option>
+                </select>
               </label>
               <label className="text-xs text-[#8899aa]">温度 Temperature
                 <input type="number" step="0.1" className="mt-1 w-full rounded border border-[#33414f] bg-[#14181c] px-2 py-1 text-sm" value={draft.temperature ?? ""}
