@@ -226,16 +226,22 @@ export default function ChatPanel({
         </div>
       )}
 
-      {/* 输入行 */}
+      {/* 输入行：Enter 发送, Shift+Enter 手动换行 */}
       {opening && (
         <p className="mt-1 text-xs text-[#5a6b7c]">助手正在开场…（可点「停止」打断）</p>
       )}
       <div className="mt-3 flex gap-2">
-        <input
-          className="flex-1 rounded-lg border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm outline-none focus:border-[#40bcf4]"
+        <textarea
+          className="flex-1 resize-none rounded-lg border border-[#33414f] bg-[#14181c] px-3 py-2 text-sm outline-none focus:border-[#40bcf4]"
+          rows={Math.min(6, Math.max(2, input.split("\n").length))}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
           placeholder={placeholder}
           disabled={streaming || !connected || opening}
         />

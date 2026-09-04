@@ -42,6 +42,6 @@ cargo build                # 产物 target/debug/betterboxd-server
 
 ## 快速开始
 
-项目提供了 ./example 作为样例数据展示各项功能, 可自行载入存档.
+项目提供了 ./example 作为样例数据展示各项功能, 可自行载入存档. 该存档已经删除各项 API Key 的配置, 记得手动去配置一下.
 
 前往 [QUICK_START.md](./docs/QUICK_START.md) 查看各项功能.
