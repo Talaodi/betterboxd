@@ -1398,7 +1398,7 @@ async fn handle_chat(
                             serde_json::json!({"prompt": pt, "completion": ct, "hit": hit, "miss": miss}),
                             serde_json::json!({"value": cost, "currency": cur_}),
                         );
-                        sync_title_from_db(&db, &mut cur);
+                        sync_title_from_db(&db, &mut cur).await;
                         let _ = sessions.save(&cur).await;
                         let _ = tx_o.send(Message::Text(
                             serde_json::json!({"type": "done", "interrupted": false,
@@ -2158,13 +2158,13 @@ fn mask_key(k: &str) -> String {
 
 /// 会话标题同步：REST 改名（/api/chats/title）直接写磁盘，而 WS 内存会话持有旧标题；
 /// run/opening 保存前以 DB 当前值为准，防止对话把用户改名覆盖回默认。
-fn sync_title_from_db(db: &DbHandle, session: &mut betterboxd_core::session::ChatSession) {
+async fn sync_title_from_db(db: &DbHandle, session: &mut betterboxd_core::session::ChatSession) {
     let sid = session.id.clone();
     let db2 = db.clone();
     if let Ok(rows) = db2.select_json(&format!(
         "SELECT title FROM chat_sessions WHERE id='{}'",
         sid.replace('\'', "''")
-    )) {
+    )).await {
         if let Some(t) = rows.first().and_then(|r| r["title"].as_str()) {
             if !t.is_empty() {
                 session.title = t.to_string();
