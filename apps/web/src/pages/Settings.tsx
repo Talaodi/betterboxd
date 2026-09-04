@@ -146,6 +146,26 @@ export default function Settings() {
         <button className="mt-2 text-xs text-[#40bcf4]" onClick={addProfile}>+ 添加配置</button>
       </section>
 
+      {/* TMDB API Key：与 AI 配置分离，独立一行 */}
+      <section className="mb-6">
+        <h2 className="mb-3 text-sm font-medium text-[#8899aa]">TMDB</h2>
+        <div className="rounded-lg border border-[#33414f] bg-[#1b222b] p-3 text-sm">
+          <label className="text-xs text-[#8899aa]">API Key（影片搜索/元数据用，与 AI Key 分离）
+            <div className="mt-1 flex gap-2">
+              <input
+                className="flex-1 rounded border border-[#33414f] bg-[#14181c] px-2 py-1"
+                placeholder="TMDB API Key"
+                value={config.tmdb.key}
+                onChange={(e) => setConfig({ ...config, tmdb: { ...config.tmdb, key: e.target.value } })}
+              />
+              <button className="shrink-0 rounded bg-[#00e054] px-3 py-1 text-xs font-medium text-[#0c1a10]" onClick={() => save(config)}>
+                保存
+              </button>
+            </div>
+          </label>
+        </div>
+      </section>
+
       {/* 编辑弹窗 */}
       {editing && draft && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditing(null)}>

@@ -35,7 +35,7 @@ struct AppState {
     config: Arc<Mutex<Config>>,
     /// 档案切换后原子重建（评审缺陷 3）：config_save 写入，读侧每轮快照
     client: Arc<std::sync::RwLock<Option<betterboxd_core::llm::ChatClient>>>,
-    tmdb: TmdbClient,
+    tmdb: Arc<std::sync::RwLock<TmdbClient>>,
     profile_name: Arc<Mutex<String>>,
     profile_model: Arc<Mutex<String>>,
     pending: Arc<Mutex<std::collections::HashMap<String, PendingRoute>>>,
@@ -177,7 +177,7 @@ fn tool_ctx(app: &App) -> ToolCtx {
     ToolCtx {
         db: app.db.clone(),
         stats_db: Some(app.stats_db.clone()),
-        tmdb: app.tmdb.clone(),
+        tmdb: app.tmdb.read().unwrap().clone(),
         config: (*app.config.lock().unwrap()).clone(),
         confirm: None, // REST = 用户明确意图
         source: "edit", // GUI/REST = 用户直接操作（审计区分 AI 写入）
@@ -213,7 +213,9 @@ async fn movies_list(
 
 async fn movie_detail(State(app): State<App>, AxPath(id): AxPath<i64>) -> Response {
     // 懒拉取：条目桩首次被访问时补全详情（directors/runtime 等）
-    let _ = betterboxd_core::tools::ensure_movie_details(&app.tmdb, &app.db, id).await;
+    // guard 必须绑定为局部变量跨 await（临时 guard 会导致 Future 非 Send/悬垂）
+    let tmdb = app.tmdb.read().unwrap().clone();
+    let _ = betterboxd_core::tools::ensure_movie_details(&tmdb, &app.db, id).await;
     let movie = app
         .db
         .select_json(&format!("SELECT * FROM v_movies WHERE tmdb_id={id}"))
@@ -711,11 +713,11 @@ async fn backdrop(State(app): State<App>, AxPath(id): AxPath<i64>) -> Response {
     let Some(bp) = bp.filter(|p| !p.is_empty()) else {
         return (StatusCode::NOT_FOUND, "无剧照").into_response();
     };
-    match app
-        .tmdb
+    let tmdb = app.tmdb.read().unwrap().clone();
+    let r = tmdb
         .download_image(&format!("https://image.tmdb.org/t/p/w1280{bp}"))
-        .await
-    {
+        .await;
+    match r {
         Ok(bytes) => {
             let _ = std::fs::write(&file, &bytes);
             ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], bytes).into_response()
@@ -741,7 +743,9 @@ async fn poster(State(app): State<App>, AxPath(id): AxPath<i64>) -> Response {
     let Some(pp) = poster_path.filter(|p| !p.is_empty()) else {
         return (StatusCode::NOT_FOUND, "无海报记录").into_response();
     };
-    match app.tmdb.download_poster(&pp).await {
+    let tmdb = app.tmdb.read().unwrap().clone();
+    let r = tmdb.download_poster(&pp).await;
+    match r {
         Ok(bytes) => {
             let _ = std::fs::write(&file, &bytes);
             ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], bytes).into_response()
@@ -1494,7 +1498,7 @@ async fn handle_chat(
             ));
             continue;
         };
-        let tmdb = app.tmdb.clone();
+        let tmdb = app.tmdb.read().unwrap().clone();
         let cfg_snapshot = app.config.lock().unwrap().clone();
         let mut task_session = current.clone();
         let ctx_inj_task = context_injection.clone();
@@ -1694,6 +1698,12 @@ async fn config_save(State(app): State<App>, Json(mut new_cfg): Json<serde_json:
             if c.save(&path).is_err() {
                 return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "配置保存失败").into_response();
             }
+            // TMDB Key 更新：重建 TmdbClient（与 AI 配置分离，独立一行）
+            *app.tmdb.write().unwrap() = TmdbClient::new(
+                c.tmdb.key.clone(),
+                c.tmdb.proxy.clone(),
+                c.tmdb.language.clone(),
+            );
             // 缺陷 3：档案切换后原子重建 client（下轮对话即生效）
             let (client, pname, pmodel) = match c.active() {
                 Ok(p) => (
@@ -2193,11 +2203,11 @@ async fn main() {
         Err(_) => (None, String::new(), String::new()),
     };
     let client = Arc::new(std::sync::RwLock::new(client));
-    let tmdb = TmdbClient::new(
+    let tmdb = Arc::new(std::sync::RwLock::new(TmdbClient::new(
         config.tmdb.key.clone(),
         config.tmdb.proxy.clone(),
         config.tmdb.language.clone(),
-    );
+    )));
     let (pname, pmodel) = (pname, pmodel);
     let posters_dir = lib_dir.join("posters");
     std::fs::create_dir_all(&posters_dir).ok();
