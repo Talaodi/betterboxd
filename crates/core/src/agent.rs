@@ -322,68 +322,10 @@ pub async fn run(
                     "tool_calls": tc_json
                 }));
 
-                // —— 写工具收集（批量确认卡）：同一轮 ≥2 个写操作合成一张确认卡，避免逐张覆盖/被迫拒 ——
-                let write_calls: Vec<&crate::llm::CompletedToolCall> = o
-                    .tool_calls
-                    .iter()
-                    .filter(|tc| tools::CONFIRM_TOOLS.contains(&tc.name.as_str()))
-                    .collect();
-
-                // 写批量确认卡：同一轮 ≥2 个写工具 → 在循环内首次触达时整体确认一次。
-                // 拒绝=全部未执行且**立即结束本轮**（不把拒绝当失败重试, 也不让模型下一轮继续撞墙）。
-                let mut batch_done = false;
+                // —— 逐张确认卡（用户裁定: 一张一张确认即可, 不用批量卡）——
+                // 拒绝=立即结束本轮（不把拒绝当失败重试, 也不让模型下一轮继续撞墙）。
                 let mut reject_stop_round = false;
                 for tc in &o.tool_calls {
-                    if tools::CONFIRM_TOOLS.contains(&tc.name.as_str())
-                        && write_calls.len() >= 2
-                    {
-                        if batch_done {
-                            continue; // 批量已消费, 跳过其余写工具
-                        }
-                        batch_done = true;
-                        let items: Vec<tools::PendingConfirm> = write_calls
-                            .iter()
-                            .map(|tc| tools::PendingConfirm {
-                                name: tc.name.clone(),
-                                args: serde_json::from_str(&tc.arguments).unwrap_or(json!({})),
-                            })
-                            .collect();
-                        let approved = match &ctx.confirm {
-                            Some(gate) => gate.request_batch(&items).await?,
-                            None => true,
-                        };
-                        if !approved {
-                            messages.push(json!({
-                                "role": "tool",
-                                "tool_call_id": tc.id.clone(),
-                                "content": json!({"error": format!("批量确认被拒绝: {} 项均未执行（如需调整请逐条提出）", items.len())}).to_string()
-                            }));
-                            on_event(AgentEvent {
-                                kind: AgentEventKind::ToolDone { name: "batch_confirm".into(), ok: false },
-                            });
-                            reject_stop_round = true;
-                            break;
-                        }
-                        for it in &write_calls {
-                            let args = serde_json::from_str(&it.arguments).unwrap_or(json!({}));
-                            on_event(AgentEvent {
-                                kind: AgentEventKind::ToolStart { name: it.name.clone(), args: serde_json::to_string(&args).unwrap_or_default() },
-                            });
-                            let result = tools::execute(&it.name, ctx, args).await;
-                            let ok = result.is_ok();
-                            if ok {
-                                fail_streak = 0;
-                                last_fail = None;
-                            }
-                            let payload = match &result {
-                                Ok(v) => v.to_string(),
-                                Err(e) => json!({"error": e}).to_string(),
-                            };
-                            on_event(AgentEvent { kind: AgentEventKind::ToolDone { name: it.name.clone(), ok } });
-                            messages.push(json!({ "role": "tool", "tool_call_id": it.id.clone(), "content": payload }));
-                        }
-                        continue;
-                    }
                     // —— 单工具（读 + 单写卡）原逻辑 ——
                     let args: Value = serde_json::from_str(&tc.arguments).unwrap_or(json!({}));
                     on_event(AgentEvent {
