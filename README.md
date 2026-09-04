@@ -8,34 +8,26 @@ Betterboxd 是专为影迷开发的综合助手, 本身不仅是一个完善且�
 
 ## 构建
 
+目前的构建流程仅保证在 Linux 系统 (包括 WSL2) 下适用, 若使用其他系统出现问题请反馈.
+
 ```bash
-# 1) 前端
 cd apps/web
 npm install
 npm run build              # 产物 apps/web/dist
 cd ../..
-
-# 2) Rust（workspace 根目录）
 cargo build                # 产物 target/debug/betterboxd-server
 ```
 
-> 前端只需构建一次；后端改动后重新 `cargo build` 并**重启进程**（`cargo check` ≠ `cargo build`）。
-
----
-
-## 四、运行
-
-**必须在 `betterboxd/`（workspace 根目录）启动**——静态资源 `apps/web/dist` 与默认数据目录 `data` 按当前工作目录相对解析。
+**必须在 `betterboxd/`（workspace 根目录）启动**.
 
 ```bash
 cd betterboxd
 ./target/debug/betterboxd-server        # 或 cargo run -p betterboxd-server
-# 浏览器打开 http://localhost:3000
 ```
 
-启动参数（可选）：
-- `--data-dir <目录>` / 环境变量 `BB_DATA`：指定数据目录（默认 `data/`，即 `data/.betterboxd/`）
-- 存档功能会通过内部重启机制自动携带该参数（见「七、存档」）
+浏览器打开 http://localhost:3000.
+
+**启动即进入存档选择界面**（选择/切换/新建/载入存档；选中后本浏览器会话不再打扰）。存档目录与 `data/.betterboxd/` 为应用内部管理，一般无需关心；缺省（尚无任何存档记录时）首启会在 `data/` 下建立默认存档。
 
 **端口占用**：默认 `127.0.0.1:3000`，被占用时进程启动会重试约 6 秒后退出；先释放端口再启动。
 
